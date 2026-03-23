@@ -489,7 +489,7 @@ if page == 3 then
     imgui.Separator()
     imgui.StrCopy(mp.result,
         u8(mp.type[0] == 0 and
-        '/ao Проходит МП "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..u8:decode(str(mp.priz))..'"\n/ao Для участия вводите /gotp' or
+        '/ao Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..u8:decode(str(mp.priz))..'" Для участия вводите /gotp' or
         '/ao Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..u8:decode(str(mp.priz))..'"\n/ao Прописывайте /gotp и присоединяйтесь к мероприятию')
     )
 
@@ -514,8 +514,8 @@ imgui.InputInt('##winner_id', mp.winner, 0, 0, imgui.InputTextFlags.CharsDecimal
 imgui.Separator()
 imgui.StrCopy(mp.result_end, u8(
     '/ao Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
-    (sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or 'Игрок не найден!')..
-    '\n/ao Поздравляем!'
+    (sampIsPlayerConnected(mp.winner[0]) and (sampGetPlayerNickname(mp.winner[0])..'['..mp.winner[0]..']') or 'Игрок не найден!')..
+    '. Поздравляем!'
 ))
 
 imgui.InputTextMultiline('##result_end', mp.result_end, 512, imgui.ImVec2(565, 80), imgui.InputTextFlags.ReadOnly)
@@ -581,13 +581,17 @@ function sampev.onBulletSync(playerId, data)
     end
 end
 
+local function punishHealViolation(id)
+    sampSendChat("/spplayer "..id)
+    printStringNow("HEAL "..sampGetPlayerNickname(id), 2000)
+    sampSendChat("/pm "..id.." 1 Запрещено пополнять здоровье на мероприятии!")
+    sampSendChat('/weap '..id.." Нарушение Правил МП")
+end
+
 function sampev.onApplyPlayerAnimation(id, animname, frameDelta, loop, lockx, locky, freeze, time)
     if mainIni.settings.antihp then
         if (animname == "ped" and frameDelta == "gum_eat") or (animname == "FOOD" and frameDelta == "EAT_Burger") or (animname == "SMOKING" and frameDelta == "M_smk_drag") then
-            sampSendChat("/spplayer "..id)
-            printStringNow("HEAL "..sampGetPlayerNickname(id), 2000)
-            sampSendChat("/pm "..id.." 1 Запрещено пополнять здоровье на мероприятии!")
-            sampSendChat('/weap '..id.." Нарушение Правил МП")
+            punishHealViolation(id)
         end
     end
     if animname == "goggles" and frameDelta == "goggles_put_on" and mainIni.settings.antiarmour then
@@ -595,6 +599,33 @@ function sampev.onApplyPlayerAnimation(id, animname, frameDelta, loop, lockx, lo
         printStringNow("ARMOUR SPAWN "..sampGetPlayerNickname(id), 2000)
         sampSendChat("/pm "..id.." 1 Запрещено пополнять броню на мероприятии!")
         sampSendChat('/weap '..id.." Нарушение Правил МП")
+    end
+end
+
+local function findPlayerIdByNickname(nickname)
+    for id = 0, 1003 do
+        if sampIsPlayerConnected(id) and sampGetPlayerNickname(id) == nickname then
+            return id
+        end
+    end
+end
+
+local function getPlayerIdFromChatMessage(text)
+    local nickname = text:match('^([%w_]+) выпил%(а%) бутылку пива$')
+
+    if nickname == nil then
+        return nil
+    end
+
+    return findPlayerIdByNickname(nickname)
+end
+
+function sampev.onServerMessage(color, text)
+    if mainIni.settings.antihp and text:find("выпил%(а%) бутылку пива") then
+        local id = getPlayerIdFromChatMessage(text)
+        if id ~= nil then
+            punishHealViolation(id)
+        end
     end
 end
 
