@@ -12,7 +12,7 @@ local directIni = "MPHelper.ini"
 local addons = require "ADDONS"
 local str = ffi.string
 local sizeof = ffi.sizeof
-local json = require "json" -- Нужен для decodeJson/encodeJson и хранения списка игнора
+local json = require "json" -- ����� ��� decodeJson/encodeJson � �������� ������ ������
 
 ffi.cdef[[
 typedef void* HANDLE;
@@ -94,7 +94,7 @@ function plvehall(ids)
     local clist = splitIds(ids)
 
     if #clist < 1 then
-        sampAddChatMessage("Введите ID транспорта!", -1)
+        sampAddChatMessage("������� ID ����������!", -1)
         return
     end
 
@@ -113,7 +113,7 @@ function plvehall(ids)
         end
     end
 
-    sampAddChatMessage("Найдено игроков: "..#players, -1)
+    sampAddChatMessage("������� �������: "..#players, -1)
 
     lua_thread.create(function()
         for _, player in pairs(players) do
@@ -124,7 +124,7 @@ function plvehall(ids)
                 wait(mainIni.settings.delay)
             end
         end
-        sampAddChatMessage("Выдача транспорта всем завершена!", -1)
+        sampAddChatMessage("������ ���������� ���� ���������!", -1)
     end)
 end
 
@@ -156,8 +156,8 @@ local mp = {
 local tkInfo = {};
 
 
-local tag = "[MPHelper] "
-local tagcolor = 0xFF0000
+local tag = "[ MPHelper ] "
+local tagcolor = 0xCC4545
 local textcolor = "{FFFFFF}"
 local warncolor = "{FFFFFF}"
 local WinState = imgui.new.bool()
@@ -226,13 +226,13 @@ local function setClipboardText(text)
 end
 
 local function buildWinnerClipboardText()
-    local winnerNick = sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or "Неизвестно"
+    local winnerNick = sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or "����������"
     local mpName = u8:decode(str(mp.name))
     local prize = formatPrize(u8:decode(str(mp.priz)))
 
     return table.concat({
         winnerNick,
-        mpName ~= "" and mpName or "Без названия",
+        mpName ~= "" and mpName or "��� ��������",
         prize
     }, "\n")
 end
@@ -240,9 +240,9 @@ end
 
 function main ()
     sampRegisterChatCommand('mph', function () WinState[0] = not WinState[0] end)
-
-    sampAddChatMessage(tag .. textcolor .. "Активация: " .. warncolor .. "/mph", tagcolor)
-    sampAddChatMessage(tag .. textcolor .. "Автор скрипта: " .. warncolor .. "Hennessy", tagcolor)
+    
+    sampAddChatMessage(tag .. textcolor .. "���������� � ������, ����������, ���������..", tagcolor)
+    sampAddChatMessage(tag .. textcolor .. "������� ������� ����: " .. warncolor .. "/mph", tagcolor)
     while true do
         wait(0)
         imgui.Procces = true
@@ -265,34 +265,38 @@ end)
 
 imgui.OnFrame(function() return WinState[0] end, function(player)
     imgui.SetNextWindowPos(imgui.ImVec2(500,500), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
-    imgui.SetNextWindowSize(imgui.ImVec2(500, 343), imgui.Cond.Always)
+    imgui.SetNextWindowSize(imgui.ImVec2(590, 343), imgui.Cond.Always)
     imgui.Begin('##Window', WinState, imgui.WindowFlags.NoScrollbar + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoTitleBar)
 
-    if addons.HeaderButton(page == 1, u8("Главная")) then
+    imgui.PushStyleVarVec2(imgui.StyleVar.FramePadding, imgui.ImVec2(26, 12))
+    imgui.SetWindowFontScale(1.15)
+    if addons.HeaderButton(page == 1, u8("�������")) then
         page = 1
     end
-    imgui.SameLine()
-        if addons.HeaderButton(page == 3, u8("Начать МП")) then
-            page = 3
-        end
-    imgui.SameLine()
-    if addons.HeaderButton(page == 4, u8("Конец МП")) then
+    imgui.SameLine(nil, 40)
+    if addons.HeaderButton(page == 3, u8("������ ��")) then
+        page = 3
+    end
+    imgui.SameLine(nil, 40)
+    if addons.HeaderButton(page == 4, u8("����� ��")) then
         page = 4
     end
-    imgui.SameLine()
-    if addons.HeaderButton(page == 2, u8("Настройки")) then
+    imgui.SameLine(nil, 40)
+    if addons.HeaderButton(page == 2, u8("���������")) then
         page = 2
     end
+    imgui.SetWindowFontScale(1.0)
+    imgui.PopStyleVar()
 
     imgui.SameLine()
-    imgui.SetCursorPosX(467)
+    imgui.SetCursorPosX(557)
     imgui.SetCursorPosY(5)
     addons.CloseButton('##closemenu', WinState, 25, 5)
 
     if page == 1 then
         imgui.Separator()
     imgui.Columns(2,'tabledep',true)
-    imgui.SetColumnWidth(0,225)
+    imgui.SetColumnWidth(0,290)
     imgui.Spacing()
     local leftColumnStartX = imgui.GetCursorPosX()
     local leftColumnWidth = imgui.GetColumnWidth()
@@ -308,31 +312,31 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     imgui.TextColored(imgui.ImVec4(0.82, 0.82, 0.82, 1.0), subTitle)
     imgui.Separator()
     imgui.Spacing()
-    if addons.ToggleButton(u8'Анти ТК',antitk) then
+    if addons.ToggleButton(u8'���� ��',antitk) then
         mainIni.settings.antitk = antitk[0] save_ini()
     end
-    if addons.ToggleButton(u8'Анти появление брони',antiarmour) then
+    if addons.ToggleButton(u8'���� ��������� �����',antiarmour) then
         mainIni.settings.antiarmour = antiarmour[0] save_ini()
     end
-    if addons.ToggleButton(u8'Анти появление хила',antihp) then
+    if addons.ToggleButton(u8'���� ��������� ����',antihp) then
         mainIni.settings.antihp = antihp[0] save_ini()
     end
-    if addons.ToggleButton(u8'Анти оружие из инвентаря',antigun) then
+    if addons.ToggleButton(u8'���� ������ �� ���������',antigun) then
         mainIni.settings.antigun = antigun[0] save_ini()
     end
-    if addons.ToggleButton(u8'Анти ДМ',antidm) then
+    if addons.ToggleButton(u8'���� ��',antidm) then
         mainIni.settings.antidm = antidm[0] save_ini()
     end
 
     imgui.NextColumn()
-    imgui.SetCursorPosY(44)
+    imgui.SetCursorPosY(39)
     local rightColumnStartX = imgui.GetCursorPosX()
     local rightColumnWidth = imgui.GetColumnWidth()
     local itemSpacingX = imgui.GetStyle().ItemSpacing.x
-    local radiusButtonSize = imgui.ImVec2(66, 28)
-    local radiusSliderWidth = 205
+    local radiusButtonSize = imgui.ImVec2(75, 27)
+    local radiusSliderWidth = 240
     local radiusButtonsRowWidth = radiusButtonSize.x * 3 + itemSpacingX * 2
-    local radiusTitle = u8'Команды по радиусу'
+    local radiusTitle = u8'������� �� �������'
 
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - imgui.CalcTextSize(radiusTitle).x) / 2, 0))
     imgui.Text(radiusTitle)
@@ -391,48 +395,48 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         sampSendChat('/cureall '..radius[0])
     end
     imgui.Spacing()
-    local giveInputWidth = 146
+    local giveInputWidth = 160
     local giveButtonSize = imgui.ImVec2(70, 27)
     local giveRowWidth = giveInputWidth + itemSpacingX + giveButtonSize.x
 
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - giveRowWidth) / 2, 0))
     imgui.PushItemWidth(giveInputWidth)
-    imgui.InputTextWithHint(u8'##veh_ids', u8'ID транспорта для выдачи', IDT, 256)
+    imgui.InputTextWithHint(u8'##veh_ids', u8'ID �/� ��� ������', IDT, 256)
     imgui.PopItemWidth()
     imgui.SameLine()
-    if addons.MaterialButton(u8'Выдать', giveButtonSize) then
+    if addons.MaterialButton(u8'������', giveButtonSize) then
         local ids = u8:decode(str(IDT))
 
         if ids ~= "" then
             plvehall(ids)
         else
-            sampAddChatMessage("Введите ID транспорта!", -1)
+            sampAddChatMessage("������� ID ����������!", -1)
         end
     end
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - giveRowWidth) / 2, 0))
     imgui.PushItemWidth(giveInputWidth)
-    imgui.InputTextWithHint(u8'##skin_id', u8'ID скина для выдачи', IDSK, 256)
+    imgui.InputTextWithHint(u8'##skin_id', u8'ID ����� ��� ������', IDSK, 256)
     imgui.PopItemWidth()
     imgui.SameLine()
-    if addons.MaterialButton(u8'Выдать ##2', giveButtonSize) then
+    if addons.MaterialButton(u8'������ ##2', giveButtonSize) then
         sampSendChat('/skinall ' .. radius[0] .. ' ' .. ffi.string(IDSK))
     end
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - giveRowWidth) / 2, 0))
     imgui.PushItemWidth(giveInputWidth)
-    imgui.InputTextWithHint(u8'##gun_id', u8'ID оружия для выдачи', IDG, 256)
+    imgui.InputTextWithHint(u8'##gun_id', u8'ID ������ ��� ������', IDG, 256)
     imgui.PopItemWidth()
     imgui.SameLine()
-    if addons.MaterialButton(u8'Выдать ##3', giveButtonSize) then
+    if addons.MaterialButton(u8'������ ##3', giveButtonSize) then
         sampSendChat('/gunall ' .. radius[0] .. ' ' .. ffi.string(IDG).. ' ' ..tostring(pt[0]))
     end
 end
 if page == 2 then
     imgui.Separator()
-    imgui.Text(u8'Ник игрока, который не будет попадать в МП')
+    imgui.Text(u8'��� ������, ������� �� ����� �������� � ��')
     imgui.PushItemWidth(200)
     imgui.InputTextWithHint(u8'##ignore_nick', u8'Jonny_Hennessy', ignor, 256)
     imgui.SameLine()
-    if addons.AnimButton(u8'Добавить') then
+    if addons.AnimButton(u8'��������') then
         local nick = u8:decode(str(ignor))
 
         if nick ~= "" then
@@ -441,11 +445,11 @@ if page == 2 then
             ffi.copy(ignor, "")
         end
     end
-    imgui.Text(u8'Задержка выдачи транспорта в мс')
+    imgui.Text(u8'�������� ������ ���������� � ��')
     if imgui.SliderInt(u8'##radius', delay, 0, 10000) then
         mainIni.settings.delay = delay[0] save_ini()
     end
-    imgui.Text(u8'Количество патронов для выдачи')
+    imgui.Text(u8'���������� �������� ��� ������')
     if imgui.InputInt(u8'##ammo_count', pt, 0, 0, imgui.InputTextFlags.CharsDecimal) then
         mainIni.settings.pt = pt[0] save_ini()
     end
@@ -455,23 +459,23 @@ if page == 3 then
     imgui.Separator()
     imgui.Columns(2, 'mpstart', true)
     imgui.SetColumnWidth(0,125)
-    -- 1 колонка (тип /ao)
+    -- 1 ������� (��� /ao)
 
     imgui.RadioButtonIntPtr('##type_0', mp.type, 0)
     imgui.SameLine()
-    imgui.Text(u8'Короткое /ao')
+    imgui.Text(u8'�������� /ao')
 
 
     imgui.RadioButtonIntPtr('##type_1', mp.type, 1)
     imgui.SameLine()
-    imgui.Text(u8'Длинное /ao')
+    imgui.Text(u8'������� /ao')
     imgui.NextColumn()
 
-    -- 2 колонка (данные)
+    -- 2 ������� (������)
 
     imgui.PushItemWidth(-1)
-    imgui.InputTextWithHint('##name', u8'Введите название МП', mp.name, 256)
-    imgui.InputTextWithHint('##prize', u8'Введите приз за МП', mp.priz, 256)
+    imgui.InputTextWithHint('##name', u8'������� �������� ��', mp.name, 256)
+    imgui.InputTextWithHint('##prize', u8'������� ���� �� ��', mp.priz, 256)
     imgui.PopItemWidth()
 
     imgui.Spacing()
@@ -481,17 +485,17 @@ if page == 3 then
 
     imgui.Columns(1)
 
-    -- 3 блок (результат)
+    -- 3 ���� (���������)
     imgui.Separator()
     imgui.StrCopy(mp.result,
         u8(mp.type[0] == 0 and
-        '/ao Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..u8:decode(str(mp.priz))..'" Для участия вводите /gotp' or
-        '/ao Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..u8:decode(str(mp.priz))..'"\n/ao Прописывайте /gotp и присоединяйтесь к мероприятию')
+        '/ao �������� �� "'..u8:decode(str(mp.name))..'". ����: "'..u8:decode(str(mp.priz))..'" ��� ������� ������� /gotp' or
+        '/ao ��������� ������, ������ ������� ����������� "'..u8:decode(str(mp.name))..'"\n/ao ����: "'..u8:decode(str(mp.priz))..'"\n/ao ������������ /gotp � ��������������� � �����������')
     )
 
     imgui.InputTextMultiline('##result', mp.result, sizeof(mp.result), imgui.ImVec2(-1, 120), imgui.InputTextFlags.ReadOnly)
     imgui.Separator()
-    if addons.AnimButton(u8'Отправить /ao') then
+    if addons.AnimButton(u8'��������� /ao') then
         local text = u8:decode(str(mp.result))
 
         lua_thread.create(function()
@@ -504,19 +508,19 @@ if page == 3 then
 end
 if page == 4 then
 imgui.Separator()
-imgui.Text(u8'ID победителя')
+imgui.Text(u8'ID ����������')
 imgui.PushItemWidth(88)
 imgui.InputInt('##winner_id', mp.winner, 0, 0, imgui.InputTextFlags.CharsDecimal)
 imgui.Separator()
 imgui.StrCopy(mp.result_end, u8(
-    '/ao Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
-    (sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or 'Неизвестно')..
-    '['..mp.winner[0]..']. Поздравляем!'
+    '/ao ���������� ����������� "'..u8:decode(str(mp.name))..'" - '..
+    (sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or '����������')..
+    '['..mp.winner[0]..']. �����������!'
 ))
 
 imgui.InputTextMultiline('##result_end', mp.result_end, 512, imgui.ImVec2(475, 80), imgui.InputTextFlags.ReadOnly)
 imgui.Separator()
-if addons.AnimButton(u8'Отправить итог /ao') then
+if addons.AnimButton(u8'��������� ���� /ao') then
     if sampIsPlayerConnected(mp.winner[0]) then
         lua_thread.create(function()
             local text = u8:decode(ffi.string(mp.result_end))
@@ -527,13 +531,13 @@ if addons.AnimButton(u8'Отправить итог /ao') then
 
             local clipboardText = buildWinnerClipboardText()
             if setClipboardText(clipboardText) then
-                sampAddChatMessage(tag .. textcolor .. "Данные победителя скопированы в буфер обмена.", tagcolor)
+                sampAddChatMessage(tag .. textcolor .. "������ ���������� ����������� � ����� ������.", tagcolor)
             else
-                sampAddChatMessage(tag .. textcolor .. "Не удалось скопировать данные в буфер обмена.", tagcolor)
+                sampAddChatMessage(tag .. textcolor .. "�� ������� ����������� ������ � ����� ������.", tagcolor)
             end
         end)
     else
-        sampAddChatMessage("Игрок не подключен или это вы!", -1)
+        sampAddChatMessage("����� �� ��������� ��� ��� ��!", -1)
     end
 end
 end
@@ -546,8 +550,8 @@ function sampev.onBulletSync(playerId, data)
     if mainIni.settings.antidm then
         sampSendChat("/spplayer "..playerId)
         printStringNow("DM "..sampGetPlayerNickname(playerId), 2000)
-        sampSendChat("/pm "..playerId.." 1 Использование оружия на мероприятии запрещено!")
-        sampSendChat('/weap '..playerId.." Изъято оружие на МП")
+        sampSendChat("/pm "..playerId.." 1 ������������� ������ �� ����������� ���������!")
+        sampSendChat('/weap '..playerId.." ������ ������ �� ��")
     end
 
     if mainIni.settings.antitk then
@@ -560,14 +564,14 @@ function sampev.onBulletSync(playerId, data)
                 if not tkInfo[playerId] then tkInfo[playerId] = 1; else tkInfo[playerId] = tkInfo[playerId] + 1; end;
 
                 if (tkInfo[playerId] >= 3) then
-                    sampAddChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] совершил {FF0000}TeamKill {FFFFFF}уже {FF0000}'..tkInfo[playerId]..' раз!!', 0xFF0000)
+                    sampAddChatMessage('WARNING >> {FFFFFF}����� '..sampGetPlayerNickname(playerId)..'['..playerId..'] �������� {FF0000}TeamKill {FFFFFF}��� {FF0000}'..tkInfo[playerId]..' ���!!', 0xFF0000)
                     if (tkInfo[playerId] == 5) then
                         lua_thread.create(function()
-                            sampAddChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] совершил {FF0000}TeamKill 5 раз{FFFFFF} и был наказан!!', 0xFF0000)
+                            sampAddChatMessage('WARNING >> {FFFFFF}����� '..sampGetPlayerNickname(playerId)..'['..playerId..'] �������� {FF0000}TeamKill 5 ���{FFFFFF} � ��� �������!!', 0xFF0000)
                             wait(0)
                             sampSendChat('/spplayer '..playerId)
                             wait(0)
-                            sampSendChat('/pm '..playerId..' 1 Я же предупреждал не ТКшить!')
+                            sampSendChat('/pm '..playerId..' 1 � �� ������������ �� ������!')
                         end)
                         tkInfo[playerId] = 0;
                     end
@@ -582,33 +586,33 @@ function sampev.onApplyPlayerAnimation(id, animname, frameDelta, loop, lockx, lo
         if (animname == "ped" and frameDelta == "gum_eat") or (animname == "FOOD" and frameDelta == "EAT_Burger") or (animname == "SMOKING" and frameDelta == "M_smk_drag") then
             sampSendChat("/spplayer "..id)
             printStringNow("HEAL "..sampGetPlayerNickname(id), 2000)
-            sampSendChat("/pm "..id.." 1 Использование лечения на мероприятии запрещено!")
-            sampSendChat('/weap '..id.." Изъято оружие на МП")
+            sampSendChat("/pm "..id.." 1 ������������� ������� �� ����������� ���������!")
+            sampSendChat('/weap '..id.." ������ ������ �� ��")
         end
     end
     if animname == "goggles" and frameDelta == "goggles_put_on" and mainIni.settings.antiarmour then
         sampSendChat("/spplayer "..id)
         printStringNow("ARMOUR SPAWN "..sampGetPlayerNickname(id), 2000)
-        sampSendChat("/pm "..id.." 1 Использование брони на мероприятии запрещено!")
-        sampSendChat('/weap '..id.." Изъято оружие на МП")
+        sampSendChat("/pm "..id.." 1 ������������� ����� �� ����������� ���������!")
+        sampSendChat('/weap '..id.." ������ ������ �� ��")
     end
 end
 
 function sampev.onPlayerChatBubble(id, col, dist, dur, msg)
-    if msg:find("выпил%(а%) бутылку пива") and mainIni.settings.antihp then
+    if msg:find("�����%(�%) ������� ����") and mainIni.settings.antihp then
         lua_thread.create(function()
             sampSendChat("/spplayer "..id)
             printStringNow("HEAL "..sampGetPlayerNickname(id), 2000)
-            sampSendChat("/pm "..id.." 1 Использование лечения на мероприятии запрещено!")
-            sampSendChat('/weap '..id.." Изъято оружие на МП")
+            sampSendChat("/pm "..id.." 1 ������������� ������� �� ����������� ���������!")
+            sampSendChat('/weap '..id.." ������ ������ �� ��")
         end)
     end
 
-    if msg:find("достал%(а%) оружие из инвентаря") and mainIni.settings.antigun then
+    if msg:find("") and mainIni.settings.antigun then
         lua_thread.create(function()
-            sampSendChat('/weap '..id.." Изъято оружие на МП")
+            sampSendChat('/weap '..id.." ������ ������ �� ��")
             wait(500)
-            sampSendChat("/pm "..id.." 1 Использование оружия из инвентаря на МП запрещено")
+            sampSendChat("/pm "..id.." 1 ������������� ������ �� ��������� �� �� ���������")
         end)
     end
 end
@@ -641,7 +645,7 @@ function GlassTheme()
     imgui.SwitchContext()
     local style = imgui.GetStyle()
 
-    -- Основные параметры
+    -- �������� ���������
     style.WindowPadding = imgui.ImVec2(12, 12)
     style.WindowRounding = 10.0
     style.ChildRounding = 8.0
@@ -658,10 +662,10 @@ function GlassTheme()
     style.WindowTitleAlign = imgui.ImVec2(0.5, 0.5)
     style.ButtonTextAlign = imgui.ImVec2(0.5, 0.5)
 
-    -- Прозрачность интерфейса (общая альфа)
+    -- ������������ ���������� (����� �����)
     style.Alpha = 0.92
 
-    -- Цвета (glass + темная тема)
+    -- ����� (glass + ������ ����)
     local c = style.Colors
 
     c[imgui.Col.Text]                   = imgui.ImVec4(1.00, 1.00, 1.00, 0.95)
@@ -678,7 +682,7 @@ function GlassTheme()
     c[imgui.Col.FrameBgHovered]         = imgui.ImVec4(0.20, 0.20, 0.25, 0.90)
     c[imgui.Col.FrameBgActive]          = imgui.ImVec4(0.25, 0.25, 0.30, 1.00)
 
-    -- Акценты (голубой цвет темы)
+    -- ������� (������� ���� ����)
     c[imgui.Col.CheckMark]              = imgui.ImVec4(0.30, 0.80, 1.00, 1.00)
     c[imgui.Col.SliderGrab]             = imgui.ImVec4(0.30, 0.80, 1.00, 0.9)
     c[imgui.Col.SliderGrabActive]       = imgui.ImVec4(0.40, 0.90, 1.00, 1.0)
@@ -712,7 +716,7 @@ function GlassTheme()
 
     c[imgui.Col.TextSelectedBg]         = imgui.ImVec4(0.30, 0.80, 1.00, 0.25)
 
-    -- Вкладки
+    -- �������
     c[imgui.Col.Tab]                    = imgui.ImVec4(0.15, 0.15, 0.20, 0.85)
     c[imgui.Col.TabHovered]             = imgui.ImVec4(0.30, 0.80, 1.00, 0.6)
     c[imgui.Col.TabActive]              = imgui.ImVec4(0.30, 0.80, 1.00, 0.9)
