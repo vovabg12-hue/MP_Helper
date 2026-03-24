@@ -13,6 +13,10 @@ local addons = require "ADDONS"
 local str = ffi.string
 local sizeof = ffi.sizeof
 local json = require "json" -- Нужен для decodeJson/encodeJson и хранения списка игнора
+local mailLogoTexture = nil
+local mailLogoPath = nil
+local logoLoadTried = false
+local logoDrawSize = imgui.ImVec2(290, 124)
 
 ffi.cdef[[
 typedef void* HANDLE;
@@ -35,6 +39,87 @@ int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, const char* lpMultiByteStr
 local CF_UNICODETEXT = 13
 local CP_UTF8 = 65001
 local GMEM_MOVEABLE = 0x0002
+
+local function getScriptDirectory()
+    local scriptPath = thisScript().path or ""
+    return scriptPath:match("^(.*[\\/])") or ""
+end
+
+local function readBinaryFile(path, maxBytes)
+    local file = io.open(path, "rb")
+    if not file then
+        return nil
+    end
+
+    local content = file:read(maxBytes or "*a")
+    file:close()
+
+    return content
+end
+
+local function getPngSize(path)
+    local header = readBinaryFile(path, 24)
+    if not header or #header < 24 then
+        return nil, nil
+    end
+
+    if header:sub(1, 8) ~= "\137PNG\r\n\026\n" then
+        return nil, nil
+    end
+
+    local w1, w2, w3, w4, h1, h2, h3, h4 = header:byte(17, 24)
+    local width = ((w1 * 256 + w2) * 256 + w3) * 256 + w4
+    local height = ((h1 * 256 + h2) * 256 + h3) * 256 + h4
+
+    if width <= 0 or height <= 0 then
+        return nil, nil
+    end
+
+    return width, height
+end
+
+local function updateLogoDrawSize(path)
+    local maxWidth, maxHeight = 290, 124
+    local width, height = getPngSize(path)
+
+    if not width or not height then
+        logoDrawSize = imgui.ImVec2(maxWidth, maxHeight)
+        return
+    end
+
+    local scale = math.min(maxWidth / width, maxHeight / height)
+    logoDrawSize = imgui.ImVec2(math.floor(width * scale + 0.5), math.floor(height * scale + 0.5))
+end
+
+local function ensureMailLogoAssets()
+    local scriptDir = getScriptDirectory()
+    local logoDir = scriptDir .. "MPHelper\\"
+    local logoPath = logoDir .. "arizona_mesa_logo.png"
+
+    if not doesDirectoryExist(logoDir) then
+        createDirectory(logoDir)
+    end
+
+    mailLogoPath = logoPath
+end
+
+local function tryLoadMailLogoTexture()
+    if mailLogoTexture or logoLoadTried or not mailLogoPath then
+        return
+    end
+
+    if not doesFileExist(mailLogoPath) then
+        return
+    end
+
+    local ok, texture = pcall(imgui.CreateTextureFromFile, mailLogoPath)
+    if ok and texture then
+        mailLogoTexture = texture
+        updateLogoDrawSize(mailLogoPath)
+    end
+    logoLoadTried = true
+end
+
 local mainIni = inicfg.load({
     settings = {
         antitk = false,
@@ -239,6 +324,7 @@ end
 
 
 function main ()
+    ensureMailLogoAssets()
     sampRegisterChatCommand('mph', function () WinState[0] = not WinState[0] end)
     
     sampAddChatMessage(tag .. textcolor .. "Подготовка к работе, пожалуйста, подождите..", tagcolor)
@@ -264,6 +350,7 @@ addEventHandler('onWindowMessage', function(msg, wparam, lparam)
 end)
 
 imgui.OnFrame(function() return WinState[0] end, function(player)
+    tryLoadMailLogoTexture()
     imgui.SetNextWindowPos(imgui.ImVec2(500,500), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
     imgui.SetNextWindowSize(imgui.ImVec2(590, 343), imgui.Cond.Always)
     imgui.Begin('##Window', WinState, imgui.WindowFlags.NoScrollbar + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoTitleBar)
@@ -297,21 +384,18 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         imgui.Separator()
     imgui.Columns(2,'tabledep',true)
     imgui.SetColumnWidth(0,290)
-    imgui.Spacing()
     local leftColumnStartX = imgui.GetCursorPosX()
     local leftColumnWidth = imgui.GetColumnWidth()
-    local mainTitle = u8("MPHelper")
-    local subTitle = u8("Arizona Mesa")
-
-    imgui.SetWindowFontScale(1.95)
-    imgui.SetCursorPosX(leftColumnStartX + math.max((leftColumnWidth - imgui.CalcTextSize(mainTitle).x) / 2, 0))
-    imgui.TextColored(imgui.ImVec4(1.0, 1.0, 1.0, 1.0), mainTitle)
-    imgui.SetWindowFontScale(1.0)
-
-    imgui.SetCursorPosX(leftColumnStartX + math.max((leftColumnWidth - imgui.CalcTextSize(subTitle).x) / 2, 0))
-    imgui.TextColored(imgui.ImVec4(0.82, 0.82, 0.82, 1.0), subTitle)
+    local logoPosY = math.max(imgui.GetCursorPosY() - 35, 0)
+    imgui.SetCursorPosY(logoPosY)
+    local logoPosX = leftColumnStartX + math.max((leftColumnWidth - logoDrawSize.x) / 2, 0)
+    imgui.SetCursorPosX(logoPosX)
+    if mailLogoTexture then
+        imgui.Image(mailLogoTexture, logoDrawSize)
+    end
+    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - 30, 0))
     imgui.Separator()
-    imgui.Spacing()
+    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - -5, 0))
     if addons.ToggleButton(u8'Анти ТК',antitk) then
         mainIni.settings.antitk = antitk[0] save_ini()
     end
@@ -327,6 +411,11 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     if addons.ToggleButton(u8'Анти ДМ',antidm) then
         mainIni.settings.antidm = antidm[0] save_ini()
     end
+    local bottomTitleTop = u8("MPHelper")
+    local bottomY = math.max(imgui.GetCursorPosY(), imgui.GetWindowHeight() - 28)
+    imgui.SetCursorPosY(bottomY)
+    imgui.SetCursorPosX(leftColumnStartX + math.max((leftColumnWidth - imgui.CalcTextSize(bottomTitleTop).x) / 2, 0))
+    imgui.TextColored(imgui.ImVec4(0.92, 0.92, 0.92, 1.0), bottomTitleTop)
 
     imgui.NextColumn()
     imgui.SetCursorPosY(39)
