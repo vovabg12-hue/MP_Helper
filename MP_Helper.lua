@@ -366,9 +366,25 @@ end)
 
 imgui.OnFrame(function() return WinState[0] end, function(player)
     tryLoadMailLogoTexture()
-    imgui.SetNextWindowPos(imgui.ImVec2(500,500), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
-    imgui.SetNextWindowSize(imgui.ImVec2(590, 343), imgui.Cond.Always)
-    imgui.Begin('##Window', WinState, imgui.WindowFlags.NoScrollbar + imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.NoTitleBar)
+    local io = imgui.GetIO()
+    local windowSize = imgui.ImVec2(590, 343)
+    imgui.SetNextWindowPos(
+        imgui.ImVec2(
+            (io.DisplaySize.x - windowSize.x) * 0.5,
+            (io.DisplaySize.y - windowSize.y) * 0.5
+        ),
+        imgui.Cond.Once
+    )
+    imgui.SetNextWindowSize(windowSize, imgui.Cond.Always)
+    imgui.Begin(
+        '##Window',
+        WinState,
+        imgui.WindowFlags.NoScrollbar
+            + imgui.WindowFlags.NoResize
+            + imgui.WindowFlags.NoCollapse
+            + imgui.WindowFlags.NoTitleBar
+            + imgui.WindowFlags.NoSavedSettings
+    )
 
     imgui.PushStyleVarVec2(imgui.StyleVar.FramePadding, imgui.ImVec2(26, 12))
     imgui.SetWindowFontScale(1.15)
