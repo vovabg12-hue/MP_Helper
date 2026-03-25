@@ -251,15 +251,12 @@ local function formatPrize(prizeText)
     local digits = tostring(prizeText or ""):gsub("%D", "")
 
     if digits == "" then
-        return "00,000,000"
+        return ""
     end
 
-    while #digits < 8 do
-        digits = "0" .. digits
-    end
-
-    if #digits == 8 then
-        return digits:sub(1, 2) .. "," .. digits:sub(3, 5) .. "," .. digits:sub(6, 8)
+    digits = digits:gsub("^0+", "")
+    if digits == "" then
+        return "0"
     end
 
     local parts = {}
@@ -607,10 +604,11 @@ if page == 3 then
 
     -- 3 блок (результат)
     imgui.Separator()
+    local formattedPrize = formatPrize(u8:decode(str(mp.priz)))
     imgui.StrCopy(mp.result,
         u8(mp.type[0] == 0 and
-        '/ao Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..u8:decode(str(mp.priz))..'" Для участия вводите /gotp' or
-        '/ao Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..u8:decode(str(mp.priz))..'"\n/ao Прописывайте /gotp и присоединяйтесь к мероприятию')
+        '/ao Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..formattedPrize..'" Для участия вводите /gotp' or
+        '/ao Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..formattedPrize..'"\n/ao Прописывайте /gotp и присоединяйтесь к мероприятию')
     )
 
     imgui.InputTextMultiline('##result', mp.result, sizeof(mp.result), imgui.ImVec2(-1, 100), imgui.InputTextFlags.ReadOnly)
