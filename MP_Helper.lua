@@ -322,6 +322,21 @@ local function buildWinnerClipboardText()
     }, "\n")
 end
 
+local function disableMainProtectionToggles()
+    antitk[0] = false
+    antiarmour[0] = false
+    antihp[0] = false
+    antigun[0] = false
+    antidm[0] = false
+
+    mainIni.settings.antitk = false
+    mainIni.settings.antiarmour = false
+    mainIni.settings.antihp = false
+    mainIni.settings.antigun = false
+    mainIni.settings.antidm = false
+    save_ini()
+end
+
 
 function main ()
     ensureMailLogoAssets()
@@ -624,6 +639,8 @@ if addons.AnimButton(u8'Отправить итог /ao') then
             else
                 sampAddChatMessage(tag .. textcolor .. "Не удалось скопировать данные в буфер обмена.", tagcolor)
             end
+
+            disableMainProtectionToggles()
         end)
     else
         sampAddChatMessage("Игрок не найден!", -1)
