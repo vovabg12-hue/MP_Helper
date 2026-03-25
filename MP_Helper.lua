@@ -384,7 +384,6 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     )
 
     imgui.PushStyleVarVec2(imgui.StyleVar.FramePadding, imgui.ImVec2(26, 12))
-    imgui.SetWindowFontScale(1.15)
     if addons.HeaderButton(page == 1, u8("Основное")) then
         page = 1
     end
@@ -400,7 +399,6 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     if addons.HeaderButton(page == 2, u8("Настройки")) then
         page = 2
     end
-    imgui.SetWindowFontScale(1.0)
     imgui.PopStyleVar()
 
     imgui.SameLine()
@@ -810,18 +808,18 @@ function GlassTheme()
     -- Цвета (glass + темная тема)
     local c = style.Colors
 
-    c[imgui.Col.Text]                   = imgui.ImVec4(1.00, 1.00, 1.00, 0.95)
+    c[imgui.Col.Text]                   = imgui.ImVec4(1.00, 1.00, 1.00, 1.00)
     c[imgui.Col.TextDisabled]           = imgui.ImVec4(0.70, 0.70, 0.70, 1.00)
 
-    c[imgui.Col.WindowBg]               = imgui.ImVec4(0.08, 0.08, 0.10, 0.92)
-    c[imgui.Col.ChildBg]                = imgui.ImVec4(0.10, 0.10, 0.12, 0.85)
-    c[imgui.Col.PopupBg]                = imgui.ImVec4(0.10, 0.10, 0.12, 0.95)
+    c[imgui.Col.WindowBg]               = imgui.ImVec4(0.08, 0.08, 0.10, 1.00)
+    c[imgui.Col.ChildBg]                = imgui.ImVec4(0.10, 0.10, 0.12, 0.98)
+    c[imgui.Col.PopupBg]                = imgui.ImVec4(0.10, 0.10, 0.12, 1.00)
 
     c[imgui.Col.Border]                 = imgui.ImVec4(1.00, 1.00, 1.00, 0.08)
     c[imgui.Col.BorderShadow]           = imgui.ImVec4(0.00, 0.00, 0.00, 0.00)
 
-    c[imgui.Col.FrameBg]                = imgui.ImVec4(0.15, 0.15, 0.18, 0.85)
-    c[imgui.Col.FrameBgHovered]         = imgui.ImVec4(0.20, 0.20, 0.25, 0.90)
+    c[imgui.Col.FrameBg]                = imgui.ImVec4(0.15, 0.15, 0.18, 0.98)
+    c[imgui.Col.FrameBgHovered]         = imgui.ImVec4(0.20, 0.20, 0.25, 1.00)
     c[imgui.Col.FrameBgActive]          = imgui.ImVec4(0.25, 0.25, 0.30, 1.00)
 
     -- Акценты (голубой цвет темы)
