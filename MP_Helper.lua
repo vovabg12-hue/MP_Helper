@@ -273,7 +273,7 @@ local function formatPrize(prizeText)
 end
 
 local function setClipboardText(text)
-    local utf8Text = tostring(text or "")
+    local utf8Text = tostring(u8(tostring(text or "")))
     local wideSize = ffi.C.MultiByteToWideChar(CP_UTF8, 0, utf8Text, #utf8Text, ffi.NULL, 0)
 
     if wideSize <= 0 then
