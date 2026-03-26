@@ -10,6 +10,9 @@ local ffi = require 'ffi'
 local inicfg = require "inicfg"
 local directIni = "MPHelper.ini"
 local addons = require "ADDONS"
+local ltn12Ok, ltn12 = pcall(require, "ltn12")
+local httpsOk, https = pcall(require, "ssl.https")
+local httpOk, http = pcall(require, "socket.http")
 local str = ffi.string
 local sizeof = ffi.sizeof
 local json = require "json" -- Нужен для decodeJson/encodeJson и хранения списка игнора
@@ -17,6 +20,7 @@ local mailLogoTexture = nil
 local mailLogoPath = nil
 local logoLoadTried = false
 local logoDrawSize = imgui.ImVec2(290, 124)
+local isMpSendInProgress = false
 
 ffi.cdef[[
 typedef void* HANDLE;
@@ -317,6 +321,116 @@ local function buildWinnerClipboardText()
         mpName ~= "" and mpName or "Без названия",
         prize
     }, "\n")
+end
+
+local function getOrganizerNickname()
+    local ok, isConnected, myId = pcall(sampGetPlayerIdByCharHandle, PLAYER_PED)
+    if ok and isConnected then
+        local nickOk, nick = pcall(sampGetPlayerNickname, myId)
+        if nickOk and nick then
+            return nick
+        end
+    end
+    return "Unknown"
+end
+
+local function parsePrizeAmount(prizeText)
+    local digits = tostring(prizeText or ""):gsub("%D", "")
+    if digits == "" then
+        return 0
+    end
+    return tonumber(digits) or 0
+end
+
+local function postJson(url, payload)
+    if not ltn12Ok or not ltn12 then
+        return false, "Модуль ltn12 недоступен."
+    end
+
+    local isHttps = url:match("^https://") ~= nil
+    local client = nil
+    if isHttps then
+        client = httpsOk and https or nil
+        if not client then
+            return false, "HTTPS-клиент недоступен (ssl.https)."
+        end
+    else
+        client = httpOk and http or nil
+        if not client then
+            return false, "HTTP-клиент недоступен (socket.http)."
+        end
+    end
+
+    local encodeOk, body = pcall(json.encode, payload)
+    if not encodeOk or type(body) ~= "string" then
+        return false, "Ошибка сериализации JSON."
+    end
+    local responseBody = {}
+
+    pcall(function()
+        client.TIMEOUT = 5
+    end)
+
+    local requestOk, ok, statusCode, _, statusLine = pcall(client.request, {
+        url = url,
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(responseBody)
+    })
+
+    if not requestOk then
+        return false, "Ошибка запроса."
+    end
+
+    if not ok then
+        return false, tostring(statusCode or statusLine or "Ошибка запроса.")
+    end
+
+    local code = tonumber(statusCode) or 0
+    if code >= 200 and code < 300 then
+        return true, code
+    end
+
+    return false, "HTTP " .. tostring(statusCode or statusLine or "unknown")
+end
+
+local function sendMpResultToServer()
+    if isMpSendInProgress then
+        return
+    end
+    
+    local winnerNick = sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or ""
+    local mpName = str(mp.name)
+    local prize = parsePrizeAmount(u8:decode(str(mp.priz)))
+    local organizerNick = getOrganizerNickname()
+
+    local payload = {
+        nick = winnerNick,
+        mp = mpName,
+        prize = prize,
+        organizer = organizerNick
+    }
+
+    lua_thread.create(function()
+        isMpSendInProgress = true
+
+        local outerOk, requestOk, ok = pcall(function()
+            local callOk, callResult = pcall(postJson, "https://mp-table-rryn.onrender.com/mp", payload)
+            return callOk, callResult
+        end)
+
+        isMpSendInProgress = false
+
+        if outerOk and requestOk and ok then
+            sampAddChatMessage(tag .. textcolor .. ":true: Данные успешно переданы в таблицу.", tagcolor)
+        else
+            sampAddChatMessage(tag .. textcolor .. ":x: Не удалось передать данные в таблицу.", tagcolor)
+        end
+    end)
 end
 
 local function disableMainProtectionToggles()
@@ -629,7 +743,7 @@ imgui.PushItemWidth(90)
 imgui.InputInt('##winner_id', mp.winner, 0, 0, imgui.InputTextFlags.CharsDecimal)
 imgui.Separator()
 imgui.StrCopy(mp.result_end, u8(
-    '/ao Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
+    '/b Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
     (sampIsPlayerConnected(mp.winner[0]) and (sampGetPlayerNickname(mp.winner[0])..'['..mp.winner[0]..']') or 'Игрок не найден!')..
     '. Поздравляем!'
 ))
@@ -646,12 +760,9 @@ if addons.AnimButton(u8'Отправить итог /ao') then
             end
 
             local clipboardText = buildWinnerClipboardText()
-            if setClipboardText(clipboardText) then
-                sampAddChatMessage(tag .. textcolor .. "Данные победителя скопированы в буфер обмена.", tagcolor)
-            else
-                sampAddChatMessage(tag .. textcolor .. "Не удалось скопировать данные в буфер обмена.", tagcolor)
-            end
+            setClipboardText(clipboardText)
 
+            sendMpResultToServer()
             disableMainProtectionToggles()
         end)
     else
