@@ -474,11 +474,11 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
 
     if page == 1 then
         imgui.Separator()
-    imgui.Columns(2,'tabledep',true)
+    imgui.Columns(2,'tabledep',false)
     imgui.SetColumnWidth(0,290)
     local leftColumnStartX = imgui.GetCursorPosX()
     local leftColumnWidth = imgui.GetColumnWidth()
-    local logoPosY = math.max(imgui.GetCursorPosY() - 30, 0)
+    local logoPosY = math.max(imgui.GetCursorPosY() - 20, 0)
     imgui.SetCursorPosY(logoPosY)
     local logoPosX = leftColumnStartX + math.max((leftColumnWidth - logoDrawSize.x) / 2, 0)
     imgui.SetCursorPosX(logoPosX)
@@ -486,8 +486,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         imgui.Image(mailLogoTexture, logoDrawSize)
     end
     imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - 30, 0))
-    imgui.Separator()
-    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - -5, 0))
+    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() + 18, 0))
     if addons.ToggleButton(u8'Анти ТК',antitk) then
         mainIni.settings.antitk = antitk[0] save_ini()
     end
@@ -610,6 +609,15 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     if addons.MaterialButton(u8'Выдать ##3', giveButtonSize) then
         sampSendChat('/gunall ' .. radius[0] .. ' ' .. ffi.string(IDG).. ' ' ..tostring(pt[0]))
     end
+    local columnsTop = imgui.GetCursorScreenPos().y - imgui.GetCursorPosY()
+    local windowPos = imgui.GetWindowPos()
+    local separatorX = windowPos.x + 290
+    imgui.GetWindowDrawList():AddLine(
+        imgui.ImVec2(separatorX, columnsTop),
+        imgui.ImVec2(separatorX, columnsTop + imgui.GetWindowHeight() - 40),
+        imgui.GetColorU32(imgui.Col.Border),
+        1.0
+    )
 end
 if page == 2 then
     imgui.Separator()
