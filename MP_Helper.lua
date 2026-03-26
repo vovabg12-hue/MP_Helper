@@ -22,28 +22,6 @@ local logoLoadTried = false
 local logoDrawSize = imgui.ImVec2(290, 124)
 local isMpSendInProgress = false
 
-ffi.cdef[[
-typedef void* HANDLE;
-typedef HANDLE HGLOBAL;
-typedef void* HWND;
-typedef unsigned int UINT;
-typedef unsigned long DWORD;
-typedef int BOOL;
-typedef unsigned long SIZE_T;
-HANDLE GlobalAlloc(UINT uFlags, SIZE_T dwBytes);
-void* GlobalLock(HGLOBAL hMem);
-BOOL GlobalUnlock(HGLOBAL hMem);
-HANDLE SetClipboardData(UINT uFormat, HANDLE hMem);
-BOOL OpenClipboard(HWND hWndNewOwner);
-BOOL CloseClipboard(void);
-BOOL EmptyClipboard(void);
-int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, const char* lpMultiByteStr, int cbMultiByte, wchar_t* lpWideCharStr, int cchWideChar);
-]]
-
-local CF_UNICODETEXT = 13
-local CP_UTF8 = 65001
-local GMEM_MOVEABLE = 0x0002
-
 local function getScriptDirectory()
     local scriptPath = thisScript().path or ""
     return scriptPath:match("^(.*[\\/])") or ""
@@ -273,42 +251,17 @@ local function formatPrize(prizeText)
     return table.concat(parts, ",")
 end
 
-local function setClipboardText(text)
-    local utf8Text = tostring(u8(tostring(text or "")))
-    local wideSize = ffi.C.MultiByteToWideChar(CP_UTF8, 0, utf8Text, #utf8Text, ffi.NULL, 0)
+local function safeSetClipboardText(text)
+    local plainText = tostring(text or "")
 
-    if wideSize <= 0 then
-        return false
+    if type(_G.setClipboardText) == "function" then
+        local ok = pcall(_G.setClipboardText, plainText)
+        if ok then
+            return true
+        end
     end
 
-    local wideBuffer = ffi.new("wchar_t[?]", wideSize + 1)
-    ffi.C.MultiByteToWideChar(CP_UTF8, 0, utf8Text, #utf8Text, wideBuffer, wideSize)
-    wideBuffer[wideSize] = 0
-
-    local memSize = ffi.sizeof("wchar_t") * (wideSize + 1)
-    local memory = ffi.C.GlobalAlloc(GMEM_MOVEABLE, memSize)
-
-    if memory == nil or memory == ffi.NULL then
-        return false
-    end
-
-    local locked = ffi.C.GlobalLock(memory)
-    if locked == nil or locked == ffi.NULL then
-        return false
-    end
-
-    ffi.copy(locked, wideBuffer, memSize)
-    ffi.C.GlobalUnlock(memory)
-
-    if ffi.C.OpenClipboard(ffi.NULL) == 0 then
-        return false
-    end
-
-    ffi.C.EmptyClipboard()
-    local result = ffi.C.SetClipboardData(CF_UNICODETEXT, memory)
-    ffi.C.CloseClipboard()
-
-    return result ~= nil
+    return false
 end
 
 local function buildWinnerClipboardText()
@@ -402,7 +355,7 @@ local function sendMpResultToServer()
     if isMpSendInProgress then
         return
     end
-    
+
     local winnerNick = sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or ""
     local mpName = str(mp.name)
     local prize = parsePrizeAmount(u8:decode(str(mp.priz)))
@@ -415,22 +368,21 @@ local function sendMpResultToServer()
         organizer = organizerNick
     }
 
-    lua_thread.create(function()
-        isMpSendInProgress = true
+    isMpSendInProgress = true
 
-        local outerOk, requestOk, ok = pcall(function()
-            local callOk, callResult = pcall(postJson, "https://mp-table-rryn.onrender.com/mp", payload)
-            return callOk, callResult
-        end)
+    local ok, resultOrError = pcall(postJson, "https://mp-table-rryn.onrender.com/mp", payload)
+    local sentOk = ok and resultOrError == true
 
-        isMpSendInProgress = false
+    isMpSendInProgress = false
 
-        if outerOk and requestOk and ok then
-            sampAddChatMessage(tag .. textcolor .. ":true: Данные успешно переданы в таблицу.", tagcolor)
-        else
-            sampAddChatMessage(tag .. textcolor .. ":x: Не удалось передать данные в таблицу.", tagcolor)
+    if sentOk then
+        sampAddChatMessage(tag .. textcolor .. ":true: Данные успешно переданы в таблицу.", tagcolor)
+    else
+        if ok and resultOrError then
+            sampAddChatMessage(tag .. textcolor .. ":warning: Ошибка отправки: " .. tostring(resultOrError), tagcolor)
         end
-    end)
+        sampAddChatMessage(tag .. textcolor .. ":x: Не удалось передать данные в таблицу.", tagcolor)
+    end
 end
 
 local function disableMainProtectionToggles()
@@ -743,7 +695,7 @@ imgui.PushItemWidth(90)
 imgui.InputInt('##winner_id', mp.winner, 0, 0, imgui.InputTextFlags.CharsDecimal)
 imgui.Separator()
 imgui.StrCopy(mp.result_end, u8(
-    '/b Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
+    '/ao Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
     (sampIsPlayerConnected(mp.winner[0]) and (sampGetPlayerNickname(mp.winner[0])..'['..mp.winner[0]..']') or 'Игрок не найден!')..
     '. Поздравляем!'
 ))
@@ -760,7 +712,10 @@ if addons.AnimButton(u8'Отправить итог /ao') then
             end
 
             local clipboardText = buildWinnerClipboardText()
-            setClipboardText(clipboardText)
+            local clipboardOk = safeSetClipboardText(clipboardText)
+            if not clipboardOk then
+                sampAddChatMessage(tag .. textcolor .. ":warning: Не удалось скопировать данные победителя в буфер обмена.", tagcolor)
+            end
 
             sendMpResultToServer()
             disableMainProtectionToggles()
