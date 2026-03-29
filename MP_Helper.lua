@@ -462,7 +462,7 @@ end)
 imgui.OnFrame(function() return WinState[0] end, function(player)
     tryLoadMailLogoTexture()
     local io = imgui.GetIO()
-    local windowSize = imgui.ImVec2(590, 375)
+    local windowSize = imgui.ImVec2(590, 365)
     imgui.SetNextWindowPos(
         imgui.ImVec2(
             (io.DisplaySize.x - windowSize.x) * 0.5,
@@ -547,6 +547,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     local rightColumnWidth = imgui.GetColumnWidth()
     local itemSpacingX = imgui.GetStyle().ItemSpacing.x
     local radiusButtonSize = imgui.ImVec2(75, 27)
+    local azakonButtonSize = imgui.ImVec2(240, 27)
     local radiusSliderWidth = 240
     local radiusButtonsRowWidth = radiusButtonSize.x * 3 + itemSpacingX * 2
     local radiusTitle = u8'Радиус действия'
@@ -572,22 +573,18 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         sampSendChat('/weapall '..radius[0])
     end
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - radiusButtonsRowWidth) / 2, 0))
-    if addons.MaterialButton('Azakon', radiusButtonSize) then
-        sampSendChat('/azakon '..radius[0])
-    end
-    imgui.SameLine()
     if addons.MaterialButton('Armour', radiusButtonSize) then
         sampSendChat('/Armourall '..radius[0])
     end
     imgui.SameLine()
-    if addons.MaterialButton('Repcar', radiusButtonSize) then
-        sampSendChat('/Repcars '..radius[0])
-    end
-    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - radiusButtonsRowWidth) / 2, 0))
     if addons.MaterialButton('UnArmour', radiusButtonSize) then
         sampSendChat('/unArmourall '..radius[0])
     end
     imgui.SameLine()
+    if addons.MaterialButton('Cure', radiusButtonSize) then
+        sampSendChat('/cureall '..radius[0])
+    end
+    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - radiusButtonsRowWidth) / 2, 0))
     if addons.MaterialButton('Freeze', radiusButtonSize) then
         sampSendChat('/freezeall '..radius[0])
     end
@@ -595,26 +592,26 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     if addons.MaterialButton('UnFreeze', radiusButtonSize) then
         sampSendChat('/unfreezeall '..radius[0])
     end
-    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - radiusButtonsRowWidth) / 2, 0))
+    imgui.SameLine()
     if addons.MaterialButton('SpPlayers', radiusButtonSize) then
         sampSendChat('/spplayers '..radius[0])
+    end
+    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - azakonButtonSize.x) / 2, 0))
+    if addons.MaterialButton('Azakon', azakonButtonSize) then
+        sampSendChat('/azakon '..radius[0])
+    end
+    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - radiusButtonsRowWidth) / 2, 0))
+    if addons.MaterialButton('Repcar', radiusButtonSize) then
+        sampSendChat('/Repcars '..radius[0])
+    end
+    imgui.SameLine()
+    if addons.MaterialButton('SetFuel', radiusButtonSize) then
+        setFuelAllInRadius(radius[0], 100)
     end
     imgui.SameLine()
     if addons.MaterialButton('SpCars', radiusButtonSize) then
         sampSendChat('/spcars '..radius[0])
     end
-    imgui.SameLine()
-    if addons.MaterialButton('Cure', radiusButtonSize) then
-        sampSendChat('/cureall '..radius[0])
-    end
-    imgui.Spacing()
-    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - 3, 0))
-    local setFuelButtonSize = imgui.ImVec2(240, 27)
-    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - setFuelButtonSize.x) / 2, 0))
-    if addons.MaterialButton('SetFuel', setFuelButtonSize) then
-        setFuelAllInRadius(radius[0], 100)
-    end
-    imgui.Spacing()
     local giveInputWidth = 160
     local giveButtonSize = imgui.ImVec2(70, 27)
     local giveRowWidth = giveInputWidth + itemSpacingX + giveButtonSize.x
