@@ -195,6 +195,38 @@ function plvehall(ids)
     end)
 end
 
+function setFuelAllInRadius(targetRadius, fuelAmount)
+    local px, py, pz = getCharCoordinates(PLAYER_PED)
+    local vehicles = getAllVehicles()
+    local vehicleIds = {}
+
+    for _, vehicle in pairs(vehicles) do
+        if doesVehicleExist(vehicle) then
+            local vx, vy, vz = getCarCoordinates(vehicle)
+            local distance = getDistanceBetweenCoords3d(px, py, pz, vx, vy, vz)
+            if distance <= targetRadius then
+                local result, carId = sampGetVehicleIdByCarHandle(vehicle)
+                if result and carId then
+                    table.insert(vehicleIds, carId)
+                end
+            end
+        end
+    end
+
+    if #vehicleIds == 0 then
+        sampAddChatMessage("Машины в радиусе не найдены!", -1)
+        return
+    end
+
+    lua_thread.create(function()
+        for _, carId in ipairs(vehicleIds) do
+            sampSendChat("/setfuel "..carId.." "..fuelAmount)
+            wait(1500)
+        end
+        sampAddChatMessage("Топливо успешно выдано всем машинам в радиусе!", -1)
+    end)
+end
+
 if not doesFileExist("MPHelper.ini") then
     inicfg.save(mainIni, "MPHelper.ini")
 end
@@ -430,7 +462,7 @@ end)
 imgui.OnFrame(function() return WinState[0] end, function(player)
     tryLoadMailLogoTexture()
     local io = imgui.GetIO()
-    local windowSize = imgui.ImVec2(590, 343)
+    local windowSize = imgui.ImVec2(590, 375)
     imgui.SetNextWindowPos(
         imgui.ImVec2(
             (io.DisplaySize.x - windowSize.x) * 0.5,
@@ -443,6 +475,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         '##Window',
         WinState,
         imgui.WindowFlags.NoScrollbar
+            + imgui.WindowFlags.NoScrollWithMouse
             + imgui.WindowFlags.NoResize
             + imgui.WindowFlags.NoCollapse
             + imgui.WindowFlags.NoTitleBar
@@ -503,7 +536,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         mainIni.settings.antidm = antidm[0] save_ini()
     end
     local bottomTitleTop = u8("MPHelper")
-    local bottomY = math.max(imgui.GetCursorPosY(), imgui.GetWindowHeight() - 28)
+    local bottomY = math.max(imgui.GetCursorPosY(), imgui.GetWindowHeight() - 30)
     imgui.SetCursorPosY(bottomY)
     imgui.SetCursorPosX(leftColumnStartX + math.max((leftColumnWidth - imgui.CalcTextSize(bottomTitleTop).x) / 2, 0))
     imgui.TextColored(imgui.ImVec4(0.92, 0.92, 0.92, 1.0), bottomTitleTop)
@@ -573,6 +606,13 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     imgui.SameLine()
     if addons.MaterialButton('Cure', radiusButtonSize) then
         sampSendChat('/cureall '..radius[0])
+    end
+    imgui.Spacing()
+    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - 3, 0))
+    local setFuelButtonSize = imgui.ImVec2(240, 27)
+    imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - setFuelButtonSize.x) / 2, 0))
+    if addons.MaterialButton('SetFuel', setFuelButtonSize) then
+        setFuelAllInRadius(radius[0], 100)
     end
     imgui.Spacing()
     local giveInputWidth = 160
