@@ -21,6 +21,7 @@ local mailLogoPath = nil
 local logoLoadTried = false
 local logoDrawSize = imgui.ImVec2(290, 124)
 local isMpSendInProgress = false
+local FIXED_TS_RADIUS = 400
 
 local function getScriptDirectory()
     local scriptPath = thisScript().path or ""
@@ -168,16 +169,27 @@ function plvehall(ids)
     local chars = getAllChars()
     local players = {}
 
+    local px, py, pz = getCharCoordinates(PLAYER_PED)
+
     for _, char in pairs(chars) do
-        local result, id = sampGetPlayerIdByCharHandle(char)
+        if char ~= PLAYER_PED then
+            local result, id = sampGetPlayerIdByCharHandle(char)
 
-        if result then
-            local nick = sampGetPlayerNickname(id)
+            if result then
+                local nick = sampGetPlayerNickname(id)
+                local cx, cy, cz = getCharCoordinates(char)
+                local distance = getDistanceBetweenCoords3d(px, py, pz, cx, cy, cz)
 
-            if not isIgnored(nick) then
-                table.insert(players, id)
+                if not isIgnored(nick) and distance <= FIXED_TS_RADIUS then
+                    table.insert(players, id)
+                end
             end
         end
+    end
+
+    if #players == 0 then
+        sampAddChatMessage("Игроки в радиусе не найдены!", -1)
+        return
     end
 
     sampAddChatMessage("Найдено игроков: "..#players, -1)
@@ -606,7 +618,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     end
     imgui.SameLine()
     if addons.MaterialButton('SetFuel', radiusButtonSize) then
-        setFuelAllInRadius(radius[0], 100)
+        setFuelAllInRadius(FIXED_TS_RADIUS, 100)
     end
     imgui.SameLine()
     if addons.MaterialButton('SpCars', radiusButtonSize) then
