@@ -110,6 +110,7 @@ local mainIni = inicfg.load({
         antihp = false,
         antigun = false,
         antidm = false,
+        autotsradius = false,
         radius = 100,
         delay = 4000,
         pt = 500
@@ -248,6 +249,7 @@ local antiarmour = imgui.new.bool((mainIni.settings.antiarmour))
 local antihp = imgui.new.bool((mainIni.settings.antihp))
 local antigun = imgui.new.bool((mainIni.settings.antigun))
 local antidm = imgui.new.bool((mainIni.settings.antidm))
+local autotsradius = imgui.new.bool((mainIni.settings.autotsradius))
 local radius = imgui.new.int((mainIni.settings.radius))
 local delay = imgui.new.int((mainIni.settings.delay))
 local pt = imgui.new.int[1](tonumber(mainIni.settings.pt) or 500)
@@ -444,11 +446,75 @@ local function disableMainProtectionToggles()
     save_ini()
 end
 
+local autoTsRadiusThreadRunning = false
+
+local function collectPlayersInFixedRadius()
+    local chars = getAllChars()
+    local players = {}
+    local px, py, pz = getCharCoordinates(PLAYER_PED)
+
+    for _, char in pairs(chars) do
+        if char ~= PLAYER_PED then
+            local result, id = sampGetPlayerIdByCharHandle(char)
+            if result then
+                local nick = sampGetPlayerNickname(id)
+                local cx, cy, cz = getCharCoordinates(char)
+                local distance = getDistanceBetweenCoords3d(px, py, pz, cx, cy, cz)
+                local hasVehicle = isCharInAnyCar(char)
+                if not isIgnored(nick) and distance <= FIXED_TS_RADIUS and not hasVehicle then
+                    table.insert(players, id)
+                end
+            end
+        end
+    end
+
+    return players
+end
+
+local function startAutoTsRadiusThread()
+    if autoTsRadiusThreadRunning then
+        return
+    end
+
+    autoTsRadiusThreadRunning = true
+    lua_thread.create(function()
+        while mainIni.settings.autotsradius do
+            local vehicleId = u8:decode(str(IDT)):match("%d+")
+
+            if not vehicleId or vehicleId == "" then
+                sampAddChatMessage(tag .. textcolor .. "Укажите ID Т/С в поле \"ID Т/С для выдачи\".", tagcolor)
+                autotsradius[0] = false
+                mainIni.settings.autotsradius = false
+                save_ini()
+                break
+            end
+
+            local players = collectPlayersInFixedRadius()
+            for _, player in ipairs(players) do
+                if not mainIni.settings.autotsradius then
+                    break
+                end
+                sampSendChat("/plveh " .. player .. " " .. vehicleId)
+                wait(mainIni.settings.delay)
+            end
+
+            if #players == 0 then
+                wait(mainIni.settings.delay)
+            end
+        end
+
+        autoTsRadiusThreadRunning = false
+    end)
+end
+
 
 function main ()
     ensureMailLogoAssets()
     sampRegisterChatCommand('mph', function () WinState[0] = not WinState[0] end)
-    
+
+    autotsradius[0] = false
+    mainIni.settings.autotsradius = false
+    save_ini()
     sampAddChatMessage(tag .. textcolor .. "Подготовка к работе, пожалуйста, подождите..", tagcolor)
     sampAddChatMessage(tag .. textcolor .. "Открыть главное меню: " .. warncolor .. "/mph", tagcolor)
     while true do
@@ -546,6 +612,16 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
     end
     if addons.ToggleButton(u8'Анти ДМ',antidm) then
         mainIni.settings.antidm = antidm[0] save_ini()
+    end
+    if addons.ToggleButton(u8'Авто выдача Т/С',autotsradius) then
+        mainIni.settings.autotsradius = autotsradius[0]
+        save_ini()
+        if autotsradius[0] then
+            startAutoTsRadiusThread()
+            sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе включена.", tagcolor)
+        else
+            sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе выключена.", tagcolor)
+        end
     end
     local bottomTitleTop = u8("MPHelper")
     local bottomY = math.max(imgui.GetCursorPosY(), imgui.GetWindowHeight() - 30)
