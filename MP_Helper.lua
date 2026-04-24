@@ -111,6 +111,7 @@ local mainIni = inicfg.load({
         antigun = false,
         antidm = false,
         autotsradius = false,
+        autospawnradius = false,
         radius = 100,
         delay = 4000,
         pt = 500
@@ -250,6 +251,7 @@ local antihp = imgui.new.bool((mainIni.settings.antihp))
 local antigun = imgui.new.bool((mainIni.settings.antigun))
 local antidm = imgui.new.bool((mainIni.settings.antidm))
 local autotsradius = imgui.new.bool((mainIni.settings.autotsradius))
+local autospawnradius = imgui.new.bool((mainIni.settings.autospawnradius))
 local radius = imgui.new.int((mainIni.settings.radius))
 local delay = imgui.new.int((mainIni.settings.delay))
 local pt = imgui.new.int[1](tonumber(mainIni.settings.pt) or 500)
@@ -443,10 +445,15 @@ local function disableMainProtectionToggles()
     mainIni.settings.antihp = false
     mainIni.settings.antigun = false
     mainIni.settings.antidm = false
+    autotsradius[0] = false
+    autospawnradius[0] = false
+    mainIni.settings.autotsradius = false
+    mainIni.settings.autospawnradius = false
     save_ini()
 end
 
 local autoTsRadiusThreadRunning = false
+local autoSpawnRadiusThreadRunning = false
 
 local function collectPlayersInFixedRadius()
     local chars = getAllChars()
@@ -507,13 +514,41 @@ local function startAutoTsRadiusThread()
     end)
 end
 
+local function startAutoSpawnRadiusThread()
+    if autoSpawnRadiusThreadRunning then
+        return
+    end
+
+    autoSpawnRadiusThreadRunning = true
+    lua_thread.create(function()
+        while mainIni.settings.autospawnradius do
+            local players = collectPlayersInFixedRadius()
+            for _, player in ipairs(players) do
+                if not mainIni.settings.autospawnradius then
+                    break
+                end
+                sampSendChat("/spplayer " .. player)
+                wait(mainIni.settings.delay)
+            end
+
+            if #players == 0 then
+                wait(mainIni.settings.delay)
+            end
+        end
+
+        autoSpawnRadiusThreadRunning = false
+    end)
+end
+
 
 function main ()
     ensureMailLogoAssets()
     sampRegisterChatCommand('mph', function () WinState[0] = not WinState[0] end)
 
     autotsradius[0] = false
+    autospawnradius[0] = false
     mainIni.settings.autotsradius = false
+    mainIni.settings.autospawnradius = false
     save_ini()
     sampAddChatMessage(tag .. textcolor .. "Подготовка к работе, пожалуйста, подождите..", tagcolor)
     sampAddChatMessage(tag .. textcolor .. "Открыть главное меню: " .. warncolor .. "/mph", tagcolor)
@@ -597,7 +632,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         imgui.Image(mailLogoTexture, logoDrawSize)
     end
     imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() - 30, 0))
-    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() + 18, 0))
+    imgui.SetCursorPosY(math.max(imgui.GetCursorPosY() + 5, 0))
     if addons.ToggleButton(u8'Анти ТК',antitk) then
         mainIni.settings.antitk = antitk[0] save_ini()
     end
@@ -614,13 +649,33 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         mainIni.settings.antidm = antidm[0] save_ini()
     end
     if addons.ToggleButton(u8'Авто выдача Т/С',autotsradius) then
-        mainIni.settings.autotsradius = autotsradius[0]
-        save_ini()
         if autotsradius[0] then
-            startAutoTsRadiusThread()
-            sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе включена.", tagcolor)
+            local vehicleId = u8:decode(str(IDT)):match("%d+")
+            if not vehicleId or vehicleId == "" then
+                autotsradius[0] = false
+                mainIni.settings.autotsradius = false
+                save_ini()
+                sampAddChatMessage(tag .. textcolor .. "Укажите ID Т/С в поле \"ID Т/С для выдачи\".", tagcolor)
+            else
+                mainIni.settings.autotsradius = true
+                save_ini()
+                startAutoTsRadiusThread()
+                sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе включена.", tagcolor)
+            end
         else
+            mainIni.settings.autotsradius = false
+            save_ini()
             sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе выключена.", tagcolor)
+        end
+    end
+    if addons.ToggleButton(u8'Авто Spawn',autospawnradius) then
+        mainIni.settings.autospawnradius = autospawnradius[0]
+        save_ini()
+        if autospawnradius[0] then
+            startAutoSpawnRadiusThread()
+            sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе включен.", tagcolor)
+        else
+            sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе выключен.", tagcolor)
         end
     end
     local bottomTitleTop = u8("MPHelper")
@@ -808,7 +863,7 @@ if page == 3 then
         '/ao Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..formattedPrize..'"\n/ao Прописывайте /gotp и присоединяйтесь к мероприятию')
     )
 
-    imgui.InputTextMultiline('##result', mp.result, sizeof(mp.result), imgui.ImVec2(-1, 100), imgui.InputTextFlags.ReadOnly)
+    imgui.InputTextMultiline('##result', mp.result, sizeof(mp.result), imgui.ImVec2(-1, 70), imgui.InputTextFlags.ReadOnly)
     imgui.Separator()
     if addons.AnimButton(u8'Отправить /ao') then
         local text = u8:decode(str(mp.result))
@@ -833,7 +888,7 @@ imgui.StrCopy(mp.result_end, u8(
     '. Поздравляем!'
 ))
 
-imgui.InputTextMultiline('##result_end', mp.result_end, 512, imgui.ImVec2(565, 80), imgui.InputTextFlags.ReadOnly)
+imgui.InputTextMultiline('##result_end', mp.result_end, 512, imgui.ImVec2(565, 40), imgui.InputTextFlags.ReadOnly)
 imgui.Separator()
 if addons.AnimButton(u8'Отправить итог /ao') then
     if sampIsPlayerConnected(mp.winner[0]) then
