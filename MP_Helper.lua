@@ -519,21 +519,48 @@ local function startAutoSpawnRadiusThread()
         return
     end
 
+    local spawnedPlayers = {}
     autoSpawnRadiusThreadRunning = true
     lua_thread.create(function()
         while mainIni.settings.autospawnradius do
-            local players = collectPlayersInFixedRadius()
-            for _, player in ipairs(players) do
+            local chars = getAllChars()
+            local px, py, pz = getCharCoordinates(PLAYER_PED)
+            local playersInRadius = {}
+
+            for _, char in pairs(chars) do
                 if not mainIni.settings.autospawnradius then
                     break
                 end
-                sampSendChat("/spplayer " .. player)
-                wait(mainIni.settings.delay)
+
+                if char ~= PLAYER_PED then
+                    local result, id = sampGetPlayerIdByCharHandle(char)
+                    if result then
+                        local nick = sampGetPlayerNickname(id)
+                        local cx, cy, cz = getCharCoordinates(char)
+                        local distance = getDistanceBetweenCoords3d(px, py, pz, cx, cy, cz)
+                        if not isIgnored(nick) and distance <= FIXED_TS_RADIUS then
+                            local inVehicle = isCharInAnyCar(char)
+                            playersInRadius[id] = true
+
+                            if inVehicle then
+                                spawnedPlayers[id] = nil
+                            elseif not spawnedPlayers[id] then
+                                sampSendChat("/spplayer " .. id)
+                                sampSendChat("/pm " .. id .. " 1 Вы были заспавнены с мероприятия за выход из ТС.")
+                                spawnedPlayers[id] = true
+                            end
+                        end
+                    end
+                end
             end
 
-            if #players == 0 then
-                wait(mainIni.settings.delay)
+            for id in pairs(spawnedPlayers) do
+                if not playersInRadius[id] then
+                    spawnedPlayers[id] = nil
+                end
             end
+
+            wait(0)
         end
 
         autoSpawnRadiusThreadRunning = false
