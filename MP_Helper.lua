@@ -888,7 +888,7 @@ imgui.StrCopy(mp.result_end, u8(
     '. Поздравляем!'
 ))
 
-imgui.InputTextMultiline('##result_end', mp.result_end, 512, imgui.ImVec2(565, 40), imgui.InputTextFlags.ReadOnly)
+imgui.InputTextMultiline('##result_end', mp.result_end, 512, imgui.ImVec2(565, 70), imgui.InputTextFlags.ReadOnly)
 imgui.Separator()
 if addons.AnimButton(u8'Отправить итог /ao') then
     if sampIsPlayerConnected(mp.winner[0]) then
