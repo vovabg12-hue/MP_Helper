@@ -299,31 +299,6 @@ local function formatPrize(prizeText)
     return table.concat(parts, ",")
 end
 
-local function safeSetClipboardText(text)
-    local plainText = tostring(text or "")
-
-    if type(_G.setClipboardText) == "function" then
-        local ok = pcall(_G.setClipboardText, plainText)
-        if ok then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function buildWinnerClipboardText()
-    local winnerNick = sampIsPlayerConnected(mp.winner[0]) and sampGetPlayerNickname(mp.winner[0]) or "Неизвестно"
-    local mpName = u8:decode(str(mp.name))
-    local prize = formatPrize(u8:decode(str(mp.priz)))
-
-    return table.concat({
-        winnerNick,
-        mpName ~= "" and mpName or "Без названия",
-        prize
-    }, "\n")
-end
-
 local function getOrganizerNickname()
     local ok, isConnected, myId = pcall(sampGetPlayerIdByCharHandle, PLAYER_PED)
     if ok and isConnected then
@@ -924,12 +899,6 @@ if addons.AnimButton(u8'Отправить итог /ao') then
             for line in text:gmatch('[^\n]+') do
                 sampSendChat(line)
                 wait(1100)
-            end
-
-            local clipboardText = buildWinnerClipboardText()
-            local clipboardOk = safeSetClipboardText(clipboardText)
-            if not clipboardOk then
-                sampAddChatMessage(tag .. textcolor .. ":warning: Не удалось скопировать данные победителя в буфер обмена.", tagcolor)
             end
 
             sendMpResultToServer()
