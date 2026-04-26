@@ -330,24 +330,49 @@ local function normalizeDialogText(value)
 end
 
 local function resolveDialogLineBySlot(dialogText, slotId)
-    local target = tostring(slotId)
-    local lineIndex = 0
-    local selectableSlotIndex = 0
+    local wanted = tonumber(slotId)
+    if wanted == nil then
+        return 0
+    end
+    wanted = math.max(0, math.floor(wanted))
+    local wantedRaw = tostring(wanted)
+    local wantedPadded = string.format("%02d", wanted)
+
+    local slotRowIndex = 0
+    local firstSlotRowIndex = nil
+    local firstParsedSlotValue = nil
     for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
         local line = normalizeDialogText(rawLine)
-        local lineSlot = line:match("%[(%d+)%]")
-        if lineSlot and tonumber(lineSlot) == tonumber(slotId) then
-            return selectableSlotIndex
+        local bracketSlot = line:match("%[(%d+)%]")
+        local idSlot = line:match("ID%s*:?%s*(%d+)")
+        local slotWordSlot = line:match("СЛОТ%s*:?%s*(%d+)")
+        local plainNumber = line:match("^(%d+)%D")
+        local token = bracketSlot or idSlot or slotWordSlot or plainNumber
+        local parsedSlot = tonumber(token)
+
+        if parsedSlot ~= nil then
+            if firstSlotRowIndex == nil then
+                firstSlotRowIndex = slotRowIndex
+                firstParsedSlotValue = parsedSlot
+            end
+            if token == wantedRaw or token == wantedPadded or parsedSlot == wanted then
+                return slotRowIndex
+            end
+            slotRowIndex = slotRowIndex + 1
         end
-        if lineSlot then
-            selectableSlotIndex = selectableSlotIndex + 1
-        end
-        if line:find("ID " .. target, 1, true) or line:find("СЛОТ " .. target, 1, true) or line:find("[" .. target .. "]", 1, true) then
-            return lineIndex
-        end
-        lineIndex = lineIndex + 1
     end
-    return math.max(0, tonumber(slotId) or 0)
+
+    if firstSlotRowIndex ~= nil then
+        if firstParsedSlotValue ~= nil then
+            local relative = wanted - firstParsedSlotValue
+            if relative >= 0 then
+                return firstSlotRowIndex + relative
+            end
+        end
+        return math.max(firstSlotRowIndex, math.min(29, wanted))
+    end
+
+    return math.max(0, math.min(29, wanted))
 end
 
 local function clampEventValues()
@@ -423,10 +448,15 @@ local function resolveDialogLineByKeywords(dialogText, keywords, fallbackIndex)
 end
 
 local function parseFieldValue(dialogText, fieldName)
-    local safeField = fieldName:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-    local value = dialogText:match(safeField .. ":%s*([^\n\r]+)")
-    if value then
-        return value:upper()
+    local safeField = normalizeDialogText(fieldName):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        if line:find(safeField, 1, true) then
+            local value = line:match(":%s*([^\n\r]+)")
+            if value then
+                return normalizeDialogText(value)
+            end
+        end
     end
     return ""
 end
@@ -455,10 +485,19 @@ local function parseFieldBoolByAliases(dialogText, aliases, fallback)
         local line = normalizeDialogText(rawLine)
         for _, alias in ipairs(aliases) do
             if line:find(alias, 1, true) then
-                if line:find("ДА", 1, true) or line:find("РАЗРЕШ", 1, true) then
+                local valuePart = line:match(":%s*(.+)$") or line
+                if valuePart:find("ДА", 1, true)
+                    or valuePart:find("РАЗРЕШ", 1, true)
+                    or valuePart:find("ВКЛ", 1, true)
+                    or valuePart:find("ON", 1, true)
+                    or valuePart:find("TRUE", 1, true) then
                     return true
                 end
-                if line:find("НЕТ", 1, true) or line:find("ЗАПРЕЩ", 1, true) then
+                if valuePart:find("НЕТ", 1, true)
+                    or valuePart:find("ЗАПРЕЩ", 1, true)
+                    or valuePart:find("ВЫКЛ", 1, true)
+                    or valuePart:find("OFF", 1, true)
+                    or valuePart:find("FALSE", 1, true) then
                     return false
                 end
             end
@@ -1213,8 +1252,7 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     end
 
     if eventAutomation.mode == "set_spawn" and decodedTitle:find("РЕДАКТИРОВАН", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true) then
-        local spawnLine = resolveDialogLineByKeywords(text, { "ПОЗИЦ", "СПАВН" }, EVENT_MENU_INDEX.SPAWN_POS)
-        sampSendDialogResponse(dialogId, 1, spawnLine, "")
+        sampSendDialogResponse(dialogId, 1, EVENT_MENU_INDEX.SPAWN_POS, "")
         eventAutomation.stage = "spawn_manage"
         return false
     end
@@ -1226,9 +1264,14 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         return false
     end
 
+    if eventAutomation.mode == "set_spawn" and eventAutomation.stage == "spawn_pick_slot" and (style == 2 or style == 4 or style == 5) then
+        sampSendDialogResponse(dialogId, 1, 0, "")
+        eventAutomation.stage = "spawn_confirm_replace"
+        return false
+    end
+
     if eventAutomation.mode == "set_spawn" and decodedTitle:find("НАЖМИТЕ НА ПОЗИЦ", 1, true) then
-        local firstSpawnLine = resolveDialogLineBySlot(text, 1)
-        sampSendDialogResponse(dialogId, 1, firstSpawnLine, "")
+        sampSendDialogResponse(dialogId, 1, 0, "")
         eventAutomation.stage = "spawn_confirm_replace"
         return false
     end
@@ -1250,36 +1293,39 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         return false
     end
 
-    if eventAutomation.stage == "edit_menu" and (style == 2 or style == 4 or style == 5) and not decodedTitle:find("СПИСОК", 1, true) then
-    elseif not decodedTitle:find("РЕДАКТИРОВАН", 1, true) or not decodedTitle:find("МЕРОПРИЯТ", 1, true) then
-        return
+    local isEditDialog = decodedTitle:find("РЕДАКТИРОВАН", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true)
+    local isListStyle = (style == 2 or style == 4 or style == 5)
+
+    if eventAutomation.mode == "load" then
+        if not ((eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true)) or isEditDialog) then
+            return
+        end
+    else
+        if eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true) then
+        elseif not isEditDialog then
+            return
+        end
     end
 
     if eventAutomation.mode == "load" then
-        eventPlayerLimit[0] = parseFieldNumberByAliases(decodedText, { "ЛИМИТ ИГРОКОВ" }, eventPlayerLimit[0])
-        eventTeleportTime[0] = parseFieldNumberByAliases(decodedText, { "ВРЕМЯ ДЕЙСТВИЯ ТЕЛЕПОРТА", "ВРЕМЯ ТЕЛЕПОРТА" }, eventTeleportTime[0])
-        eventHp[0] = parseFieldNumberByAliases(decodedText, { "ВЫДАТЬ ЗДОРОВЬЕ", "ЗДОРОВЬЕ" }, eventHp[0])
-        eventArmour[0] = parseFieldNumberByAliases(decodedText, { "ВЫДАТЬ БРОНЮ", "ВЫДАТЬ БРОНЬ", "БРОНЯ", "БРОНЬ" }, eventArmour[0])
-        eventSkin[0] = parseFieldNumberByAliases(decodedText, { "ВЫДАТЬ СКИН", "СКИН" }, eventSkin[0])
-        local loadedPassword = parseFieldValue(decodedText, "ПАРОЛЬ")
+        eventPlayerLimit[0] = parseFieldNumberByAliases(text, { "ЛИМИТ ИГРОКОВ" }, eventPlayerLimit[0])
+        eventTeleportTime[0] = parseFieldNumberByAliases(text, { "ВРЕМЯ ДЕЙСТВИЯ ТЕЛЕПОРТА", "ВРЕМЯ ТЕЛЕПОРТА" }, eventTeleportTime[0])
+        eventHp[0] = parseFieldNumberByAliases(text, { "ВЫДАТЬ ЗДОРОВЬЕ", "ЗДОРОВЬЕ" }, eventHp[0])
+        eventArmour[0] = parseFieldNumberByAliases(text, { "ВЫДАТЬ БРОНЮ", "ВЫДАТЬ БРОНЬ", "БРОНЯ", "БРОНЬ" }, eventArmour[0])
+        eventSkin[0] = parseFieldNumberByAliases(text, { "ВЫДАТЬ СКИН", "СКИН" }, eventSkin[0])
+        local loadedPassword = parseFieldValue(text, "ПАРОЛЬ")
         if loadedPassword ~= "" then
             imgui.StrCopy(eventPassword, loadedPassword:gsub("%s+", ""))
         else
             imgui.StrCopy(eventPassword, "0")
         end
-        eventRepeatTp[0] = parseFieldBoolByAliases(decodedText, { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, eventRepeatTp[0])
-        eventAllowDamage[0] = parseFieldBoolByAliases(decodedText, { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ" }, eventAllowDamage[0])
-        eventAccessoryEffect[0] = parseFieldBoolByAliases(decodedText, { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ" }, eventAccessoryEffect[0])
-        eventGuards[0] = not parseFieldBoolByAliases(decodedText, { "ОХРАННИКИ" }, not eventGuards[0])
-        eventPlayerCollision[0] = parseFieldBoolByAliases(decodedText, { "КОЛЛИЗИЯ ИГРОКОВ" }, eventPlayerCollision[0])
+        eventRepeatTp[0] = parseFieldBoolByAliases(text, { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, eventRepeatTp[0])
+        eventAllowDamage[0] = not parseFieldBoolByAliases(text, { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "УРОН ПО ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, not eventAllowDamage[0])
+        eventAccessoryEffect[0] = parseFieldBoolByAliases(text, { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОН" }, eventAccessoryEffect[0])
+        eventGuards[0] = parseFieldBoolByAliases(text, { "ОХРАННИКИ" }, eventGuards[0])
+        eventPlayerCollision[0] = parseFieldBoolByAliases(text, { "КОЛЛИЗИЯ ИГРОКОВ" }, eventPlayerCollision[0])
         eventAutomation.active = false
         sampSendDialogResponse(dialogId, 0, 0, "")
-        return false
-    end
-
-    if eventAutomation.mode == "set_spawn" then
-        local spawnLine = resolveDialogLineByKeywords(text, { "ПОЗИЦ", "СПАВН" }, EVENT_MENU_INDEX.SPAWN_POS)
-        sampSendDialogResponse(dialogId, 1, spawnLine, "")
         return false
     end
 
@@ -1296,11 +1342,11 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
                 { index = EVENT_MENU_INDEX.SKIN, input = tostring(eventSkin[0]) }
             }
             eventAutomation.toggleSteps = {
-                { index = EVENT_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", target = eventRepeatTp[0] },
-                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", target = eventAllowDamage[0] },
-                { index = EVENT_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", target = eventAccessoryEffect[0] },
-                { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", target = not eventGuards[0] },
-                { index = EVENT_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", target = eventPlayerCollision[0] }
+                { index = EVENT_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", aliases = { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, target = eventRepeatTp[0] },
+                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "УРОН ПО ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, target = not eventAllowDamage[0] },
+                { index = EVENT_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", aliases = { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОН" }, target = eventAccessoryEffect[0] },
+                { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", aliases = { "ОХРАННИКИ" }, target = eventGuards[0] },
+                { index = EVENT_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", aliases = { "КОЛЛИЗИЯ ИГРОКОВ" }, target = eventPlayerCollision[0] }
             }
         end
 
@@ -1315,8 +1361,8 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         while eventAutomation.toggleStep <= #eventAutomation.toggleSteps do
             local step = eventAutomation.toggleSteps[eventAutomation.toggleStep]
             eventAutomation.toggleStep = eventAutomation.toggleStep + 1
-            if needsToggle(decodedText, step.name, step.target) then
-                sampSendDialogResponse(dialogId, 1, step.index, "")
+            local currentValue = parseFieldBoolByAliases(text, step.aliases or { step.name }, nil)
+            if currentValue ~= nil and currentValue ~= step.target then
                 return false
             end
         end
