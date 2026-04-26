@@ -5,10 +5,7 @@ local u8 = encoding.UTF8
 require "lib.moonloader"
 imgui.HotKey = require("imgui_addons").HotKey
 local wm = require("windows.message")
-local hasSampev, sampev = pcall(require, "lib.samp.events")
-if not hasSampev or not sampev then
-    sampev = require "samp.events"
-end
+local sampev = require "samp.events"
 local ffi = require 'ffi'
 local inicfg = require "inicfg"
 local directIni = "MPHelper.ini"
@@ -25,7 +22,6 @@ local logoLoadTried = false
 local logoDrawSize = imgui.ImVec2(290, 124)
 local isMpSendInProgress = false
 local FIXED_TS_RADIUS = 400
-local scriptChatMessage
 
 local function getScriptDirectory()
     local scriptPath = thisScript().path or ""
@@ -139,13 +135,6 @@ function isIgnored(nick)
             return true
         end
     end
-    if eventAutomation.mode == "set_spawn" then
-        eventAutomation.active = false
-        eventSpawnStatusText = u8("Позиция: Не удалось автоустановить")
-        eventSpawnStatusColor = imgui.ImVec4(0.90, 0.35, 0.35, 1.0)
-        return
-    end
-
     return false
 end
 function table.contains(t, element)
@@ -175,7 +164,7 @@ function plvehall(ids)
     local clist = splitIds(ids)
 
     if #clist < 1 then
-        scriptChatMessage("Введите ID транспорта!")
+        sampAddChatMessage("Введите ID транспорта!", -1)
         return
     end
 
@@ -201,11 +190,11 @@ function plvehall(ids)
     end
 
     if #players == 0 then
-        scriptChatMessage("Игроки в радиусе не найдены!")
+        sampAddChatMessage("Игроки в радиусе не найдены!", -1)
         return
     end
 
-    scriptChatMessage("Найдено игроков: "..#players)
+    sampAddChatMessage("Найдено игроков: "..#players, -1)
 
     lua_thread.create(function()
         for _, player in pairs(players) do
@@ -216,7 +205,7 @@ function plvehall(ids)
                 wait(mainIni.settings.delay)
             end
         end
-        scriptChatMessage("Т/С выданы всем игрокам!")
+        sampAddChatMessage("Т/С выданы всем игрокам!", -1)
     end)
 end
 
@@ -239,7 +228,7 @@ function setFuelAllInRadius(targetRadius, fuelAmount)
     end
 
     if #vehicleIds == 0 then
-        scriptChatMessage("Машины в радиусе не найдены!")
+        sampAddChatMessage("Машины в радиусе не найдены!", -1)
         return
     end
 
@@ -248,7 +237,7 @@ function setFuelAllInRadius(targetRadius, fuelAmount)
             sampSendChat("/setfuel "..carId.." "..fuelAmount)
             wait(1500)
         end
-        scriptChatMessage("Топливо успешно выдано всем машинам в радиусе!")
+        sampAddChatMessage("Топливо успешно выдано всем машинам в радиусе!", -1)
     end)
 end
 
@@ -279,437 +268,14 @@ local mp = {
     winner = imgui.new.int(0),
     result_end = imgui.new.char[512]()
 }
-local eventConfigWindow = imgui.new.bool(false)
-local eventSlotIdText = imgui.new.char[8]()
-local eventPlayerLimit = imgui.new.int(0)
-local eventTeleportTime = imgui.new.int(0)
-local eventPassword = imgui.new.char[32]()
-local eventHp = imgui.new.int(0)
-local eventArmour = imgui.new.int(0)
-local eventSkin = imgui.new.int(0)
-local eventRepeatTp = imgui.new.bool(false)
-local eventAllowDamage = imgui.new.bool(false)
-local eventAccessoryEffect = imgui.new.bool(false)
-local eventGuards = imgui.new.bool(false)
-local eventPlayerCollision = imgui.new.bool(true)
-local eventSpawnApplied = false
-local eventSpawnStatusText = u8("Позиция: Не установлено")
-local eventSpawnStatusColor = imgui.ImVec4(0.85, 0.35, 0.35, 1.0)
-local eventSpawnMessageSent = false
-local hideSpawnDialogsUntil = 0
-local hideEventDialogsUntil = 0
-local hiddenEventDialogsUntil = {}
-local eventAutomation = {
-    active = false,
-    mode = nil,
-    stage = nil,
-    valueStep = 1,
-    toggleStep = 1,
-    valueSteps = {},
-    toggleSteps = {},
-    startAfterSave = false,
-    slot = 0,
-    loading = false,
-    pendingInput = nil,
-    inRulesMenu = false,
-    broadcastText = nil,
-    startAttempts = 0
-}
-
-local EVENT_MENU_INDEX = {
-    RULES_MENU = 1,
-    SPAWN_POS = 2,
-    BROADCAST = 3,
-    PLAYER_LIMIT = 4,
-    TELEPORT_TIME = 5,
-    PASSWORD = 6,
-    HP = 7,
-    ARMOUR = 8,
-    SKIN = 9,
-    REPEAT_TP = 13,
-    DAMAGE_PLAYERS = 15,
-    ACCESSORY_EFFECT = 16,
-    GUARDS = 17,
-    PLAYER_COLLISION = 24,
-    START_EVENT = 25,
-    SAVE_CHANGES = 26
-}
-
-local RULES_MENU_INDEX = {
-    REPEAT_TP = 0,
-    DAMAGE_PLAYERS = 2,
-    ACCESSORY_EFFECT = 3,
-    GUARDS = 4,
-    PLAYER_COLLISION = 8,
-    START_EVENT = 10
-}
-
-imgui.StrCopy(eventPassword, "0")
-
-local function normalizeDialogText(value)
-    local text = tostring(value or ""):upper()
-    text = text:gsub("{[%x]+}", "")
-    text = text:gsub("\t", " ")
-    text = text:gsub("%s+", " ")
-    return text
-end
-
-local function resolveDialogLineBySlot(dialogText, slotId)
-    local wanted = tonumber(slotId)
-    if wanted == nil then
-        return 0
-    end
-    wanted = math.max(0, math.floor(wanted))
-    local wantedRaw = tostring(wanted)
-    local wantedPadded = string.format("%02d", wanted)
-
-    local slotRowIndex = 0
-    local parsedRows = {}
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        local bracketSlot = line:match("%[(%d+)%]")
-        local idSlot = line:match("ID%s*:?%s*(%d+)")
-        local slotWordSlot = line:match("СЛОТ%s*:?%s*(%d+)")
-        local plainNumber = line:match("^(%d+)%D")
-        local token = bracketSlot or idSlot or slotWordSlot or plainNumber
-        local parsedSlot = tonumber(token)
-
-        if parsedSlot ~= nil then
-            table.insert(parsedRows, { row = slotRowIndex, slot = parsedSlot, token = token })
-            if token == wantedRaw or token == wantedPadded or parsedSlot == wanted then
-                return slotRowIndex
-            end
-            slotRowIndex = slotRowIndex + 1
-        end
-    end
-
-    if #parsedRows > 0 then
-        local hasZeroSlot = false
-        for _, row in ipairs(parsedRows) do
-            if row.slot == 0 then
-                hasZeroSlot = true
-                break
-            end
-        end
-
-        if not hasZeroSlot then
-            local oneBasedWanted = wanted + 1
-            for _, row in ipairs(parsedRows) do
-                if row.slot == oneBasedWanted then
-                    return row.row
-                end
-            end
-        end
-
-        local firstSlotRowIndex = parsedRows[1].row
-        local firstParsedSlotValue = parsedRows[1].slot
-        local relative = wanted - firstParsedSlotValue
-        if relative >= 0 then
-            return firstSlotRowIndex + relative
-        end
-        return math.max(firstSlotRowIndex, math.min(29, wanted))
-    end
-
-    return math.max(0, math.min(29, wanted))
-end
-
-local function clampEventValues()
-    eventPlayerLimit[0] = math.max(0, eventPlayerLimit[0])
-    eventTeleportTime[0] = math.max(1, math.min(300, eventTeleportTime[0]))
-    eventHp[0] = math.max(0, math.min(250, eventHp[0]))
-    eventArmour[0] = math.max(0, math.min(250, eventArmour[0]))
-    eventSkin[0] = math.max(0, eventSkin[0])
-end
-
-local function getEventSlotId()
-    local raw = ffi.string(eventSlotIdText)
-    if raw == "" then
-        return nil
-    end
-    local num = tonumber(raw)
-    if not num then
-        return nil
-    end
-    num = math.floor(num)
-    if num < 0 then
-        num = 0
-    end
-    if num > 29 then
-        num = 29
-    end
-    return num
-end
-
-local function startEventAutomation(mode, aoText)
-    clampEventValues()
-    local slotId = getEventSlotId()
-    if slotId == nil then
-        eventAutomation.active = false
-        eventSpawnStatusText = u8("Позиция: Укажите слот 0-29")
-        eventSpawnStatusColor = imgui.ImVec4(0.90, 0.35, 0.35, 1.0)
-        scriptChatMessage("Укажите номер слота МП (0-29), затем повторите действие.")
-        return
-    end
-    eventAutomation.active = true
-    eventAutomation.mode = mode
-    eventAutomation.stage = "select_slot"
-    eventAutomation.valueStep = 1
-    eventAutomation.toggleStep = 1
-    eventAutomation.valueSteps = {}
-    eventAutomation.toggleSteps = {}
-    eventAutomation.startAfterSave = mode == "apply_and_start"
-    eventAutomation.slot = slotId
-    eventAutomation.loading = (mode == "load")
-    eventAutomation.pendingInput = nil
-    eventAutomation.inRulesMenu = false
-    eventAutomation.broadcastText = aoText
-    eventAutomation.startAttempts = 0
-    if mode == "apply" or mode == "apply_and_start" then
-        hideEventDialogsUntil = os.clock() + 8
-    end
-    if mode == "set_spawn" then
-        eventSpawnApplied = false
-        eventSpawnMessageSent = false
-        hideSpawnDialogsUntil = os.clock() + 8
-        eventSpawnStatusText = u8("Позиция: Выполняется сохранение...")
-        eventSpawnStatusColor = imgui.ImVec4(0.95, 0.80, 0.20, 1.0)
-    end
-    sampSendChat("/eventmenu")
-end
-
-local function resolveDialogLineByKeywords(dialogText, keywords, fallbackIndex)
-    local lineIndex = 0
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        local matched = true
-        for _, keyword in ipairs(keywords) do
-            if not line:find(keyword, 1, true) then
-                matched = false
-                break
-            end
-        end
-        if matched then
-            return lineIndex
-        end
-        lineIndex = lineIndex + 1
-    end
-    return fallbackIndex or 0
-end
-
-local function parseFieldValue(dialogText, fieldName)
-    local safeField = normalizeDialogText(fieldName):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        if line:find(safeField, 1, true) then
-            local value = line:match(":%s*([^\n\r]+)")
-            if value then
-                return normalizeDialogText(value)
-            end
-        end
-    end
-    return ""
-end
-
-local function parseFieldNumberByAliases(dialogText, aliases, fallback)
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        for _, alias in ipairs(aliases) do
-            if line:find(alias, 1, true) then
-                local afterColon = line:match(":%s*([%-]?%d+)")
-                if afterColon then
-                    return tonumber(afterColon) or fallback
-                end
-                local anyNumber = line:match("([%-]?%d+)")
-                if anyNumber then
-                    return tonumber(anyNumber) or fallback
-                end
-            end
-        end
-    end
-    return fallback
-end
-
-local function resolveDialogLineByAliases(dialogText, aliases, fallbackIndex)
-    local rowIndex = 0
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        if line ~= "" then
-            for _, alias in ipairs(aliases or {}) do
-                if line:find(normalizeDialogText(alias), 1, true) then
-                    return rowIndex
-                end
-            end
-            rowIndex = rowIndex + 1
-        end
-    end
-    if fallbackIndex ~= nil then
-        return fallbackIndex
-    end
-    return nil
-end
-
-local function findDialogRowByAliases(dialogText, aliases)
-    local rowIndex = 0
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        if line ~= "" then
-            for _, alias in ipairs(aliases or {}) do
-                if line:find(normalizeDialogText(alias), 1, true) then
-                    return rowIndex, line
-                end
-            end
-            rowIndex = rowIndex + 1
-        end
-    end
-    return nil, nil
-end
-
-local function parseBoolFromValueText(valuePart)
-    local value = normalizeDialogText(valuePart or "")
-    if value == "" then
-        return nil
-    end
-
-    if value:find("ДА", 1, true)
-        or value:find("РАЗРЕШ", 1, true)
-        or value:find("ВКЛ", 1, true)
-        or value:find("ВКЛЮЧ", 1, true)
-        or value:find("ON", 1, true)
-        or value:find("TRUE", 1, true)
-        or value:find("АКТИВ", 1, true)
-        or value:find("ENABLE", 1, true)
-        or value:find("[+]", 1, true)
-        or value:find("(+)", 1, true) then
-        return true
-    end
-
-    if value:find("НЕТ", 1, true)
-        or value:find("ЗАПРЕЩ", 1, true)
-        or value:find("ВЫКЛ", 1, true)
-        or value:find("OFF", 1, true)
-        or value:find("FALSE", 1, true)
-        or value:find("НЕАКТИВ", 1, true)
-        or value:find("ОТКЛ", 1, true)
-        or value:find("ВЫКЛЮЧ", 1, true)
-        or value:find("DISABLE", 1, true)
-        or value:find("[-]", 1, true)
-        or value:find("(-)", 1, true) then
-        return false
-    end
-
-    return nil
-end
-
-local function parseFieldBoolByAliases(dialogText, aliases, fallback)
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        for _, alias in ipairs(aliases) do
-            if line:find(alias, 1, true) then
-                local valuePart = line:match(":%s*(.+)$") or line
-                local parsed = parseBoolFromValueText(valuePart)
-                if parsed ~= nil then
-                    return parsed
-                end
-            end
-        end
-    end
-    return fallback
-end
-
-local function parseFieldBoolByRowIndex(dialogText, rowIndex, fallback)
-    local wanted = tonumber(rowIndex)
-    if wanted == nil then
-        return fallback
-    end
-    wanted = math.max(0, math.floor(wanted))
-    local currentIndex = 0
-    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
-        local line = normalizeDialogText(rawLine)
-        if line ~= "" then
-            if currentIndex == wanted then
-                local parsed = parseBoolFromValueText(line)
-                if parsed ~= nil then
-                    return parsed
-                end
-                break
-            end
-            currentIndex = currentIndex + 1
-        end
-    end
-    return fallback
-end
-
-local function parseDamageAllowed(dialogText, fallback)
-    local positive = parseFieldBoolByAliases(dialogText, {
-        "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ",
-        "УРОН ДРУГИМ ИГРОКАМ",
-        "УРОН ПО ИГРОКАМ"
-    }, nil)
-    if positive ~= nil then
-        return positive
-    end
-
-    local negative = parseFieldBoolByAliases(dialogText, {
-        "ЗАПРЕТ УРОНА ПО ИГРОКАМ"
-    }, nil)
-    if negative ~= nil then
-        return not negative
-    end
-
-    return fallback
-end
-
-local function isEventAutomationDialog(titleText, bodyText)
-    local title = normalizeDialogText(titleText)
-    local body = normalizeDialogText(bodyText)
-
-    local titleLooksEvent = title:find("МЕРОПРИЯТ", 1, true)
-        or title:find("СПАВ", 1, true)
-        or title:find("ПРАВИЛ", 1, true)
-        or title:find("РЕДАКТИРОВАН", 1, true)
-
-    local bodyLooksEvent = body:find("МЕРОПРИЯТ", 1, true)
-        or body:find("ПОЗИЦ", 1, true)
-        or body:find("СПАВ", 1, true)
-        or body:find("ПОВТОР", 1, true)
-        or body:find("КОЛЛИЗ", 1, true)
-
-    return titleLooksEvent or bodyLooksEvent
-end
-
-local function dialogHasRuleRows(dialogText, steps)
-    for _, step in ipairs(steps or {}) do
-        if resolveDialogLineByAliases(dialogText, step.aliases or {}, nil) ~= nil then
-            return true
-        end
-    end
-    return false
-end
-
-local function needsToggle(dialogText, fieldName, targetYes)
-    local current = parseFieldValue(dialogText, fieldName)
-    if current == "" then
-        return true
-    end
-    local isYes = current:find("ДА", 1, true) ~= nil
-    return isYes ~= targetYes
-end
 local tkInfo = {};
 
 
-local tag = "[ Event Helper ] "
+local tag = "[ MPHelper ] "
 local tagcolor = 0xCC4545
 local textcolor = "{FFFFFF}"
 local warncolor = "{FFFFFF}"
 local WinState = imgui.new.bool()
-
-scriptChatMessage = function(message)
-    local msg = tostring(message or "")
-    if msg:sub(1, #tag) ~= tag then
-        msg = tag .. textcolor .. msg
-    end
-    sampAddChatMessage(msg, tagcolor)
-end
 
 local function formatPrize(prizeText)
     local digits = tostring(prizeText or ""):gsub("%D", "")
@@ -833,12 +399,12 @@ local function sendMpResultToServer()
     isMpSendInProgress = false
 
     if sentOk then
-        scriptChatMessage(":true: Данные успешно переданы в таблицу.")
+        sampAddChatMessage(tag .. textcolor .. ":true: Данные успешно переданы в таблицу.", tagcolor)
     else
         if ok and resultOrError then
-            scriptChatMessage(":warning: Ошибка отправки: " .. tostring(resultOrError))
+            sampAddChatMessage(tag .. textcolor .. ":warning: Ошибка отправки: " .. tostring(resultOrError), tagcolor)
         end
-        scriptChatMessage(":x: Не удалось передать данные в таблицу.")
+        sampAddChatMessage(tag .. textcolor .. ":x: Не удалось передать данные в таблицу.", tagcolor)
     end
 end
 
@@ -898,7 +464,7 @@ local function startAutoTsRadiusThread()
             local vehicleId = u8:decode(str(IDT)):match("%d+")
 
             if not vehicleId or vehicleId == "" then
-                scriptChatMessage("Укажите ID Т/С в поле \"ID Т/С для выдачи\".")
+                sampAddChatMessage(tag .. textcolor .. "Укажите ID Т/С в поле \"ID Т/С для выдачи\".", tagcolor)
                 autotsradius[0] = false
                 mainIni.settings.autotsradius = false
                 save_ini()
@@ -986,9 +552,8 @@ function main ()
     mainIni.settings.autotsradius = false
     mainIni.settings.autospawnradius = false
     save_ini()
-    scriptChatMessage("Подготовка к работе, пожалуйста, подождите..")
-    scriptChatMessage("Открыть главное меню: " .. warncolor .. "/mph")
-    scriptChatMessage("Разработчик скрипта: V.Harrison")
+    sampAddChatMessage(tag .. textcolor .. "Подготовка к работе, пожалуйста, подождите..", tagcolor)
+    sampAddChatMessage(tag .. textcolor .. "Открыть главное меню: " .. warncolor .. "/mph", tagcolor)
     while true do
         wait(0)
         imgui.Procces = true
@@ -998,16 +563,12 @@ local page = 1
 
 addEventHandler('onWindowMessage', function(msg, wparam, lparam)
     if wparam == 27 then
-        if WinState[0] or eventConfigWindow[0] then
+        if WinState[0] then
             if msg == wm.WM_KEYDOWN then
                 consumeWindowMessage(true, false)
             end
             if msg == wm.WM_KEYUP then
-                if eventConfigWindow[0] then
-                    eventConfigWindow[0] = false
-                elseif WinState[0] then
-                    WinState[0] = false
-                end
+                WinState[0] = false
             end
         end
     end
@@ -1053,6 +614,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         page = 2
     end
     imgui.PopStyleVar()
+
     imgui.SameLine()
     imgui.SetCursorPosX(557)
     imgui.SetCursorPosY(5)
@@ -1095,17 +657,17 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
                 autotsradius[0] = false
                 mainIni.settings.autotsradius = false
                 save_ini()
-                scriptChatMessage("Укажите ID Т/С в поле \"ID Т/С для выдачи\".")
+                sampAddChatMessage(tag .. textcolor .. "Укажите ID Т/С в поле \"ID Т/С для выдачи\".", tagcolor)
             else
                 mainIni.settings.autotsradius = true
                 save_ini()
                 startAutoTsRadiusThread()
-                scriptChatMessage("Автовыдача Т/С в радиусе включена.")
+                sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе включена.", tagcolor)
             end
         else
             mainIni.settings.autotsradius = false
             save_ini()
-            scriptChatMessage("Автовыдача Т/С в радиусе выключена.")
+            sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе выключена.", tagcolor)
         end
     end
     if addons.ToggleButton(u8'Авто Spawn',autospawnradius) then
@@ -1113,12 +675,12 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         save_ini()
         if autospawnradius[0] then
             startAutoSpawnRadiusThread()
-            scriptChatMessage("Авто Spawn игроков без Т/С в радиусе включен.")
+            sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе включен.", tagcolor)
         else
-            scriptChatMessage("Авто Spawn игроков без Т/С в радиусе выключен.")
+            sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе выключен.", tagcolor)
         end
     end
-    local bottomTitleTop = u8("Event Helper")
+    local bottomTitleTop = u8("MPHelper")
     local bottomY = math.max(imgui.GetCursorPosY(), imgui.GetWindowHeight() - 30)
     imgui.SetCursorPosY(bottomY)
     imgui.SetCursorPosX(leftColumnStartX + math.max((leftColumnWidth - imgui.CalcTextSize(bottomTitleTop).x) / 2, 0))
@@ -1210,7 +772,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         if ids ~= "" then
             plvehall(ids)
         else
-            scriptChatMessage("Введите ID транспорта!")
+            sampAddChatMessage("Введите ID транспорта!", -1)
         end
     end
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - giveRowWidth) / 2, 0))
@@ -1243,7 +805,7 @@ if page == 2 then
     imgui.Separator()
     imgui.Text(u8'Ники игроков которым не нужно выдавать Т/С')
     imgui.PushItemWidth(200)
-    imgui.InputTextWithHint(u8'##ignore_nick', u8'Vladimir_Harrison', ignor, 256)
+    imgui.InputTextWithHint(u8'##ignore_nick', u8'Jonny_Hennessy', ignor, 256)
     imgui.SameLine()
     if addons.AnimButton(u8'Добавить') then
         local nick = u8:decode(str(ignor))
@@ -1299,19 +861,21 @@ if page == 3 then
     local formattedPrize = formatPrize(u8:decode(str(mp.priz)))
     imgui.StrCopy(mp.result,
         u8(mp.type[0] == 0 and
-        '/c [Event] Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..formattedPrize..'" Для участия вводите /gotp' or
-        '/ao [Event] Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao [Event] Приз: "'..formattedPrize..'"\n/ao [Event] Прописывайте /gotp и присоединяйтесь к мероприятию')
+        '/ao Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..formattedPrize..'" Для участия вводите /gotp' or
+        '/ao Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao Приз: "'..formattedPrize..'"\n/ao Прописывайте /gotp и присоединяйтесь к мероприятию')
     )
 
     imgui.InputTextMultiline('##result', mp.result, sizeof(mp.result), imgui.ImVec2(-1, 70), imgui.InputTextFlags.ReadOnly)
     imgui.Separator()
-    if addons.AnimButton(u8'Настройка мероприятия') then
-        eventConfigWindow[0] = true
-    end
-    imgui.Spacing()
     if addons.AnimButton(u8'Отправить /ao') then
         local text = u8:decode(str(mp.result))
-        startEventAutomation("start_with_ao", text)
+
+        lua_thread.create(function()
+            for line in text:gmatch('[^\n]+') do
+                sampSendChat(line)
+                wait(1100)
+            end
+        end)
     end
 end
 if page == 4 then
@@ -1321,7 +885,7 @@ imgui.PushItemWidth(90)
 imgui.InputInt('##winner_id', mp.winner, 0, 0, imgui.InputTextFlags.CharsDecimal)
 imgui.Separator()
 imgui.StrCopy(mp.result_end, u8(
-    '/ao [Event] Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
+    '/ao Победитель мероприятия "'..u8:decode(str(mp.name))..'" - '..
     (sampIsPlayerConnected(mp.winner[0]) and (sampGetPlayerNickname(mp.winner[0])..'['..mp.winner[0]..']') or 'Игрок не найден!')..
     '. Поздравляем!'
 ))
@@ -1341,415 +905,12 @@ if addons.AnimButton(u8'Отправить итог /ao') then
             disableMainProtectionToggles()
         end)
     else
-        scriptChatMessage("Игрок не найден!")
+        sampAddChatMessage("Игрок не найден!", -1)
     end
 end
 end
 
 end)
-
-imgui.OnFrame(function() return eventConfigWindow[0] end, function()
-    imgui.SetNextWindowSize(imgui.ImVec2(430, 420), imgui.Cond.FirstUseEver)
-    imgui.Begin(u8'Настройка мероприятия', eventConfigWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse)
-
-    imgui.Text(u8'Номер слота МП')
-    imgui.PushItemWidth(80)
-    if imgui.InputTextWithHint(u8'##event_slot_id', u8'0-29', eventSlotIdText, 8, imgui.InputTextFlags.CharsDecimal) then
-        eventAutomation.active = false
-    end
-    imgui.PopItemWidth()
-    imgui.SameLine()
-    if addons.MaterialButton(u8'+', imgui.ImVec2(28, 24)) then
-        local slotId = getEventSlotId() or 0
-        slotId = math.min(29, slotId + 1)
-        imgui.StrCopy(eventSlotIdText, tostring(slotId))
-        eventAutomation.active = false
-    end
-    imgui.SameLine()
-    if addons.MaterialButton(u8'-', imgui.ImVec2(28, 24)) then
-        local slotId = getEventSlotId() or 0
-        slotId = math.max(0, slotId - 1)
-        imgui.StrCopy(eventSlotIdText, tostring(slotId))
-        eventAutomation.active = false
-    end
-
-    if addons.MaterialButton(u8'Позиция спавна', imgui.ImVec2(170, 26)) then
-        startEventAutomation("set_spawn")
-    end
-    imgui.SetCursorPosY(imgui.GetCursorPosY() + 3)
-    imgui.TextColored(eventSpawnStatusColor, eventSpawnStatusText)
-
-    imgui.PushItemWidth(120)
-    imgui.InputInt(u8'Лимит игроков', eventPlayerLimit, 0, 0)
-    imgui.InputInt(u8'Время действия телепорта', eventTeleportTime, 0, 0)
-    imgui.InputTextWithHint(u8'##event_password', u8'Пароль', eventPassword, 32)
-    imgui.SameLine()
-    imgui.Text(u8'Пароль для входа')
-    imgui.InputInt(u8'Выдать здоровье', eventHp, 0, 0)
-    imgui.InputInt(u8'Выдать бронь', eventArmour, 0, 0)
-    imgui.InputInt(u8'Выдать скин', eventSkin, 0, 0)
-    imgui.PopItemWidth()
-
-    imgui.Checkbox(u8'Повторный телепорт', eventRepeatTp)
-    imgui.Checkbox(u8'Нанесение урона другим игрокам', eventAllowDamage)
-    imgui.Checkbox(u8'Эффект от аксессуаров', eventAccessoryEffect)
-    imgui.Checkbox(u8'Охранники', eventGuards)
-    imgui.Checkbox(u8'Коллизия игроков', eventPlayerCollision)
-
-    imgui.Separator()
-    if addons.MaterialButton(u8'Применить настройки', imgui.ImVec2(190, 28)) then
-        startEventAutomation("apply")
-    end
-
-    imgui.End()
-end)
-
-function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
-    local decodedTitle = normalizeDialogText(title)
-    local now = os.clock()
-    local dialogIsEvent = isEventAutomationDialog(title, text)
-
-    if eventAutomation.active and dialogIsEvent then
-        hiddenEventDialogsUntil[dialogId] = now + 10
-    end
-
-    if hiddenEventDialogsUntil[dialogId] and hiddenEventDialogsUntil[dialogId] < now then
-        hiddenEventDialogsUntil[dialogId] = nil
-    end
-
-    if not eventAutomation.active and hiddenEventDialogsUntil[dialogId] then
-        return false
-    end
-
-    if now < hideSpawnDialogsUntil and not eventAutomation.active then
-        return false
-    end
-    if now < hideEventDialogsUntil and not eventAutomation.active then
-        return false
-    end
-
-    if not eventAutomation.active then
-        return
-    end
-
-    local decodedText = normalizeDialogText(text)
-    local decodedButton1 = normalizeDialogText(button1)
-
-    if eventAutomation.stage == "select_slot" and decodedTitle:find("РЕДАКТИРОВАН", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true) then
-        eventAutomation.stage = "edit_menu"
-    end
-
-    if eventAutomation.stage == "select_slot" and (style == 2 or style == 4 or style == 5) then
-        local slotLine = resolveDialogLineBySlot(text, eventAutomation.slot)
-        sampSendDialogResponse(dialogId, 1, slotLine, "")
-        eventAutomation.stage = "edit_menu"
-        return false
-    end
-
-    if decodedTitle:find("СПИСОК", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true) then
-        local slotLine = resolveDialogLineBySlot(text, eventAutomation.slot)
-        sampSendDialogResponse(dialogId, 1, slotLine, "")
-        eventAutomation.stage = "edit_menu"
-        return false
-    end
-
-    if eventAutomation.mode == "set_spawn" then
-        local isListStyle = (style == 2 or style == 4 or style == 5)
-
-        if eventAutomation.stage == "edit_menu" and isListStyle then
-            local spawnManageLine = resolveDialogLineByAliases(text, { "ПОЗИЦИИ СПАВНА", "ПОЗИЦИЯ СПАВНА", "СПАВН" }, EVENT_MENU_INDEX.SPAWN_POS)
-            sampSendDialogResponse(dialogId, 1, spawnManageLine, "")
-            eventAutomation.stage = "spawn_manage"
-            return false
-        end
-
-        if eventAutomation.stage == "spawn_manage" then
-            local editPosLine = resolveDialogLineByKeywords(text, { "РЕДАКТИРОВАТЬ", "ПОЗИЦ" }, 2)
-            sampSendDialogResponse(dialogId, 1, editPosLine, "")
-            eventAutomation.stage = "spawn_pick_slot"
-            return false
-        end
-
-        if eventAutomation.stage == "spawn_pick_slot" and isListStyle then
-            local spawnSlotLine = resolveDialogLineBySlot(text, 1)
-            sampSendDialogResponse(dialogId, 1, spawnSlotLine, "")
-            eventSpawnApplied = true
-            eventSpawnStatusText = u8("Позиция: Установлена")
-            eventSpawnStatusColor = imgui.ImVec4(0.20, 0.85, 0.30, 1.0)
-            eventAutomation.active = false
-            hideSpawnDialogsUntil = os.clock() + 5
-            if not eventSpawnMessageSent then
-                eventSpawnMessageSent = true
-                scriptChatMessage("Позиция спавна успешно установлена.")
-            end
-            return false
-        end
-    end
-
-    if eventAutomation.mode == "set_spawn" then
-        return false
-    end
-
-    if eventAutomation.pendingInput ~= nil and (style == 1 or decodedButton1:find("ИЗМЕНИТЬ", 1, true) or decodedButton1:find("ЗАМЕНИТЬ", 1, true)) then
-        local value = eventAutomation.pendingInput
-        eventAutomation.pendingInput = nil
-        sampSendDialogResponse(dialogId, 1, 0, value)
-        return false
-    end
-
-    local isEditDialog = decodedTitle:find("РЕДАКТИРОВАН", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true)
-    local isListStyle = (style == 2 or style == 4 or style == 5)
-
-    local isRulesMenuDialog = eventAutomation.inRulesMenu and isListStyle
-
-    if eventAutomation.mode == "start_only" or eventAutomation.mode == "start_with_ao" then
-        if eventAutomation.stage == "edit_menu" and isListStyle then
-            local startLine = resolveDialogLineByAliases(text, {
-                "ЗАПУСТИТЬ ЭТО МЕРОПРИЯТИЕ",
-                "ЗАПУСТИТЬ МЕРОПРИЯТИЕ",
-                "ЗАПУСТИТЬ",
-                "НАЧАТЬ МЕРОПРИЯТИЕ",
-                "СТАРТ МЕРОПРИЯТИЯ"
-            }, nil)
-            if startLine == nil then
-                startLine = resolveDialogLineByKeywords(text, { "ЗАПУСТ" }, EVENT_MENU_INDEX.START_EVENT)
-            end
-
-            if startLine ~= nil then
-                local currentDialogId = dialogId
-                lua_thread.create(function()
-                    local triedRows = {}
-                    for _, rowIndex in ipairs({ startLine, EVENT_MENU_INDEX.START_EVENT, RULES_MENU_INDEX.START_EVENT }) do
-                        if rowIndex ~= nil and not triedRows[rowIndex] then
-                            triedRows[rowIndex] = true
-                            sampSendDialogResponse(currentDialogId, 1, rowIndex, "")
-                            wait(120)
-                        end
-                    end
-                end)
-                eventAutomation.startAttempts = eventAutomation.startAttempts + 1
-                eventAutomation.stage = "start_confirm"
-                return false
-            end
-        end
-
-        if eventAutomation.stage == "start_confirm" then
-            local hasConfirmStep = style == 1
-                or decodedTitle:find("ПОДТВЕР", 1, true)
-                or decodedButton1:find("ДА", 1, true)
-                or decodedButton1:find("ПОДТВЕР", 1, true)
-            local startRowStillExists = isListStyle and resolveDialogLineByAliases(text, {
-                "ЗАПУСТИТЬ ЭТО МЕРОПРИЯТИЕ",
-                "ЗАПУСТИТЬ МЕРОПРИЯТИЕ",
-                "ЗАПУСТИТЬ"
-            }, nil) ~= nil
-
-            if hasConfirmStep then
-                sampSendDialogResponse(dialogId, 1, 0, "")
-            elseif startRowStillExists and eventAutomation.startAttempts < 3 then
-                local retryStartLine = resolveDialogLineByAliases(text, {
-                    "ЗАПУСТИТЬ ЭТО МЕРОПРИЯТИЕ",
-                    "ЗАПУСТИТЬ МЕРОПРИЯТИЕ",
-                    "ЗАПУСТИТЬ",
-                    "НАЧАТЬ МЕРОПРИЯТИЕ",
-                    "СТАРТ МЕРОПРИЯТИЯ"
-                }, nil)
-                if retryStartLine == nil then
-                    retryStartLine = resolveDialogLineByKeywords(text, { "ЗАПУСТ" }, EVENT_MENU_INDEX.START_EVENT)
-                end
-                if retryStartLine ~= nil then
-                    local retryDialogId = dialogId
-                    lua_thread.create(function()
-                        local triedRows = {}
-                        for _, rowIndex in ipairs({ retryStartLine, EVENT_MENU_INDEX.START_EVENT, RULES_MENU_INDEX.START_EVENT }) do
-                            if rowIndex ~= nil and not triedRows[rowIndex] then
-                                triedRows[rowIndex] = true
-                                sampSendDialogResponse(retryDialogId, 1, rowIndex, "")
-                                wait(120)
-                            end
-                        end
-                    end)
-                    eventAutomation.startAttempts = eventAutomation.startAttempts + 1
-                    return false
-                end
-            elseif startRowStillExists then
-                eventAutomation.active = false
-                eventAutomation.inRulesMenu = false
-                eventAutomation.broadcastText = nil
-                scriptChatMessage("Не удалось запустить МП: кнопка запуска не сработала.")
-                return false
-            end
-
-            local shouldSendAo = eventAutomation.mode == "start_with_ao" and tostring(eventAutomation.broadcastText or "") ~= ""
-            local aoText = eventAutomation.broadcastText
-            local launchConfirmed = decodedTitle:find("ЗАПУЩ", 1, true) ~= nil
-                or decodedText:find("ЗАПУЩ", 1, true) ~= nil
-                or decodedText:find("УСПЕШ", 1, true) ~= nil
-            eventAutomation.active = false
-            eventAutomation.inRulesMenu = false
-            eventAutomation.broadcastText = nil
-            if shouldSendAo and launchConfirmed then
-                lua_thread.create(function()
-                    for line in tostring(aoText):gmatch("[^\n]+") do
-                        sampSendChat(line)
-                        wait(1100)
-                    end
-                end)
-                scriptChatMessage("МП запускается, /ao отправлен.")
-            elseif shouldSendAo then
-                scriptChatMessage("МП не подтверждено как запущенное, /ao не отправлен.")
-            else
-                scriptChatMessage("Команда запуска МП отправлена.")
-            end
-            return false
-        end
-    end
-
-    if eventAutomation.mode == "load" then
-        if not ((eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true)) or isEditDialog) then
-            return false
-        end
-    else
-        if isRulesMenuDialog then
-        elseif eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true) then
-        elseif not isEditDialog then
-            return false
-        end
-    end
-
-    if eventAutomation.mode == "load" then
-        eventPlayerLimit[0] = parseFieldNumberByAliases(text, { "ЛИМИТ ИГРОКОВ" }, eventPlayerLimit[0])
-        eventTeleportTime[0] = parseFieldNumberByAliases(text, { "ВРЕМЯ ДЕЙСТВИЯ ТЕЛЕПОРТА", "ВРЕМЯ ТЕЛЕПОРТА" }, eventTeleportTime[0])
-        eventHp[0] = parseFieldNumberByAliases(text, { "ВЫДАТЬ ЗДОРОВЬЕ", "ЗДОРОВЬЕ" }, eventHp[0])
-        eventArmour[0] = parseFieldNumberByAliases(text, { "ВЫДАТЬ БРОНЮ", "ВЫДАТЬ БРОНЬ", "БРОНЯ", "БРОНЬ" }, eventArmour[0])
-        eventSkin[0] = parseFieldNumberByAliases(text, { "ВЫДАТЬ СКИН", "СКИН" }, eventSkin[0])
-        local loadedPassword = parseFieldValue(text, "ПАРОЛЬ")
-        if loadedPassword ~= "" then
-            imgui.StrCopy(eventPassword, loadedPassword:gsub("%s+", ""))
-        else
-            imgui.StrCopy(eventPassword, "0")
-        end
-        do
-            local parsed = parseFieldBoolByAliases(text, { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, nil)
-            if parsed ~= nil then
-                eventRepeatTp[0] = parsed
-            end
-        end
-        do
-            local parsed = parseDamageAllowed(text, nil)
-            if parsed ~= nil then
-                eventAllowDamage[0] = parsed
-            end
-        end
-        do
-            local parsed = parseFieldBoolByAliases(text, { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОН" }, nil)
-            if parsed ~= nil then
-                eventAccessoryEffect[0] = parsed
-            end
-        end
-        do
-            local parsed = parseFieldBoolByAliases(text, { "ОХРАННИКИ" }, nil)
-            if parsed ~= nil then
-                eventGuards[0] = parsed
-            end
-        end
-        do
-            local parsed = parseFieldBoolByAliases(text, { "КОЛЛИЗИЯ ИГРОКОВ" }, nil)
-            if parsed ~= nil then
-                eventPlayerCollision[0] = parsed
-            end
-        end
-        eventAutomation.active = false
-        sampSendDialogResponse(dialogId, 0, 0, "")
-        return false
-    end
-
-    if eventAutomation.mode == "apply" or eventAutomation.mode == "apply_and_start" then
-        if #eventAutomation.valueSteps == 0 then
-            local messageText = 'Проходит МП "' .. u8:decode(str(mp.name)) .. '". Приз: "' .. formatPrize(u8:decode(str(mp.priz))) .. '". Для участия вводите /gotp'
-            eventAutomation.valueSteps = {
-                { name = "СООБЩЕНИЕ НА ВЕСЬ СЕРВЕР", index = EVENT_MENU_INDEX.BROADCAST, input = messageText },
-                { name = "ЛИМИТ ИГРОКОВ", index = EVENT_MENU_INDEX.PLAYER_LIMIT, input = tostring(eventPlayerLimit[0]) },
-                { name = "ВРЕМЯ ДЕЙСТВИЯ ТЕЛЕПОРТА", index = EVENT_MENU_INDEX.TELEPORT_TIME, input = tostring(eventTeleportTime[0]) },
-                { name = "ПАРОЛЬ ДЛЯ ВХОДА", index = EVENT_MENU_INDEX.PASSWORD, input = u8:decode(str(eventPassword)) ~= "" and u8:decode(str(eventPassword)) or "0" },
-                { name = "ВЫДАТЬ ЗДОРОВЬЕ", index = EVENT_MENU_INDEX.HP, input = tostring(eventHp[0]) },
-                { name = "ВЫДАТЬ БРОНЮ", index = EVENT_MENU_INDEX.ARMOUR, input = tostring(eventArmour[0]) },
-                { name = "ВЫДАТЬ СКИН", index = EVENT_MENU_INDEX.SKIN, input = tostring(eventSkin[0]) }
-            }
-            eventAutomation.toggleSteps = {
-                { index = EVENT_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", aliases = { "ПОВТОРНЫЙ ТЕЛЕПОРТ", "ПОВТОР ТЕЛЕПОРТА" }, target = eventRepeatTp[0] },
-                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, parser = parseDamageAllowed, target = eventAllowDamage[0] },
-                { index = EVENT_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", aliases = { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ" }, target = eventAccessoryEffect[0] },
-                { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", aliases = { "ОХРАННИКИ" }, target = eventGuards[0] },
-                { index = EVENT_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", aliases = { "КОЛЛИЗИЯ ИГРОКОВ", "КОЛЛИЗИЯ" }, target = eventPlayerCollision[0] }
-            }
-        end
-
-        if eventAutomation.valueStep <= #eventAutomation.valueSteps then
-            local step = eventAutomation.valueSteps[eventAutomation.valueStep]
-            eventAutomation.valueStep = eventAutomation.valueStep + 1
-            eventAutomation.pendingInput = step.input
-            sampSendDialogResponse(dialogId, 1, step.index, "")
-            return false
-        end
-
-        local hasRuleRowsHere = dialogHasRuleRows(text, eventAutomation.toggleSteps)
-        if not hasRuleRowsHere and not eventAutomation.inRulesMenu then
-            eventAutomation.inRulesMenu = true
-            sampSendDialogResponse(dialogId, 1, EVENT_MENU_INDEX.RULES_MENU, "")
-            return false
-        end
-
-        local toggleClicks = {}
-        for _, step in ipairs(eventAutomation.toggleSteps) do
-            local rowIndex = step.index
-            local rowByAlias = resolveDialogLineByAliases(text, step.aliases or {}, nil)
-            if rowByAlias ~= nil then
-                rowIndex = rowByAlias
-            end
-
-            local currentValue = nil
-            if step.parser then
-                currentValue = step.parser(text, nil)
-            end
-            if currentValue == nil and step.aliases then
-                currentValue = parseFieldBoolByAliases(text, step.aliases, nil)
-            end
-            if currentValue == nil then
-                currentValue = parseFieldBoolByRowIndex(text, rowIndex, nil)
-            end
-            if currentValue == nil and step.target == true then
-                table.insert(toggleClicks, rowIndex)
-            elseif currentValue ~= nil and currentValue ~= step.target then
-                table.insert(toggleClicks, rowIndex)
-            end
-        end
-
-        local needStartEvent = eventAutomation.startAfterSave
-        eventAutomation.active = false
-        eventAutomation.valueSteps = {}
-        eventAutomation.toggleSteps = {}
-        eventAutomation.valueStep = 1
-        eventAutomation.toggleStep = 1
-        eventAutomation.inRulesMenu = false
-
-        lua_thread.create(function()
-            hideEventDialogsUntil = os.clock() + 6
-            for _, rowIndex in ipairs(toggleClicks) do
-                sampSendDialogResponse(dialogId, 1, rowIndex, "")
-                wait(120)
-            end
-            if needStartEvent then
-                wait(250)
-                startEventAutomation("start_only")
-            end
-            scriptChatMessage("Настройки успешно применены.")
-        end)
-        return false
-    end
-
-    return false
-end
 
 
 
@@ -1771,10 +932,10 @@ function sampev.onBulletSync(playerId, data)
                 if not tkInfo[playerId] then tkInfo[playerId] = 1; else tkInfo[playerId] = tkInfo[playerId] + 1; end;
 
                 if (tkInfo[playerId] >= 3) then
-                    scriptChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] был замечен в {FF0000}TeamKill {FFFFFF}уже {FF0000}'..tkInfo[playerId]..' раз!!')
+                    sampAddChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] был замечен в {FF0000}TeamKill {FFFFFF}уже {FF0000}'..tkInfo[playerId]..' раз!!', 0xFF0000)
                     if (tkInfo[playerId] == 5) then
                         lua_thread.create(function()
-                            scriptChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] совершил {FF0000}TeamKill 5 раз{FFFFFF} и был наказан!!')
+                            sampAddChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] совершил {FF0000}TeamKill 5 раз{FFFFFF} и был наказан!!', 0xFF0000)
                             wait(0)
                             sampSendChat('/spplayer '..playerId)
                             wait(0)
