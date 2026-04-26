@@ -339,8 +339,7 @@ local function resolveDialogLineBySlot(dialogText, slotId)
     local wantedPadded = string.format("%02d", wanted)
 
     local slotRowIndex = 0
-    local firstSlotRowIndex = nil
-    local firstParsedSlotValue = nil
+    local parsedRows = {}
     for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
         local line = normalizeDialogText(rawLine)
         local bracketSlot = line:match("%[(%d+)%]")
@@ -351,10 +350,7 @@ local function resolveDialogLineBySlot(dialogText, slotId)
         local parsedSlot = tonumber(token)
 
         if parsedSlot ~= nil then
-            if firstSlotRowIndex == nil then
-                firstSlotRowIndex = slotRowIndex
-                firstParsedSlotValue = parsedSlot
-            end
+            table.insert(parsedRows, { row = slotRowIndex, slot = parsedSlot, token = token })
             if token == wantedRaw or token == wantedPadded or parsedSlot == wanted then
                 return slotRowIndex
             end
@@ -362,12 +358,29 @@ local function resolveDialogLineBySlot(dialogText, slotId)
         end
     end
 
-    if firstSlotRowIndex ~= nil then
-        if firstParsedSlotValue ~= nil then
-            local relative = wanted - firstParsedSlotValue
-            if relative >= 0 then
-                return firstSlotRowIndex + relative
+    if #parsedRows > 0 then
+        local hasZeroSlot = false
+        for _, row in ipairs(parsedRows) do
+            if row.slot == 0 then
+                hasZeroSlot = true
+                break
             end
+        end
+
+        if not hasZeroSlot then
+            local oneBasedWanted = wanted + 1
+            for _, row in ipairs(parsedRows) do
+                if row.slot == oneBasedWanted then
+                    return row.row
+                end
+            end
+        end
+
+        local firstSlotRowIndex = parsedRows[1].row
+        local firstParsedSlotValue = parsedRows[1].slot
+        local relative = wanted - firstParsedSlotValue
+        if relative >= 0 then
+            return firstSlotRowIndex + relative
         end
         return math.max(firstSlotRowIndex, math.min(29, wanted))
     end
@@ -480,29 +493,126 @@ local function parseFieldNumberByAliases(dialogText, aliases, fallback)
     return fallback
 end
 
+local function resolveDialogLineByAliases(dialogText, aliases, fallbackIndex)
+    local rowIndex = 0
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        if line ~= "" then
+            for _, alias in ipairs(aliases or {}) do
+                if line:find(normalizeDialogText(alias), 1, true) then
+                    return rowIndex
+                end
+            end
+            rowIndex = rowIndex + 1
+        end
+    end
+    return fallbackIndex or 0
+end
+
+local function findDialogRowByAliases(dialogText, aliases)
+    local rowIndex = 0
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        if line ~= "" then
+            for _, alias in ipairs(aliases or {}) do
+                if line:find(normalizeDialogText(alias), 1, true) then
+                    return rowIndex, line
+                end
+            end
+            rowIndex = rowIndex + 1
+        end
+    end
+    return nil, nil
+end
+
+local function parseBoolFromValueText(valuePart)
+    local value = normalizeDialogText(valuePart or "")
+    if value == "" then
+        return nil
+    end
+
+    if value:find("ДА", 1, true)
+        or value:find("РАЗРЕШ", 1, true)
+        or value:find("ВКЛ", 1, true)
+        or value:find("ON", 1, true)
+        or value:find("TRUE", 1, true)
+        or value:find("АКТИВ", 1, true)
+        or value:find("[+]", 1, true)
+        or value:find("(+)", 1, true) then
+        return true
+    end
+
+    if value:find("НЕТ", 1, true)
+        or value:find("ЗАПРЕЩ", 1, true)
+        or value:find("ВЫКЛ", 1, true)
+        or value:find("OFF", 1, true)
+        or value:find("FALSE", 1, true)
+        or value:find("НЕАКТИВ", 1, true)
+        or value:find("ОТКЛ", 1, true)
+        or value:find("[-]", 1, true)
+        or value:find("(-)", 1, true) then
+        return false
+    end
+
+    return nil
+end
+
 local function parseFieldBoolByAliases(dialogText, aliases, fallback)
     for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
         local line = normalizeDialogText(rawLine)
         for _, alias in ipairs(aliases) do
             if line:find(alias, 1, true) then
                 local valuePart = line:match(":%s*(.+)$") or line
-                if valuePart:find("ДА", 1, true)
-                    or valuePart:find("РАЗРЕШ", 1, true)
-                    or valuePart:find("ВКЛ", 1, true)
-                    or valuePart:find("ON", 1, true)
-                    or valuePart:find("TRUE", 1, true) then
-                    return true
-                end
-                if valuePart:find("НЕТ", 1, true)
-                    or valuePart:find("ЗАПРЕЩ", 1, true)
-                    or valuePart:find("ВЫКЛ", 1, true)
-                    or valuePart:find("OFF", 1, true)
-                    or valuePart:find("FALSE", 1, true) then
-                    return false
+                local parsed = parseBoolFromValueText(valuePart)
+                if parsed ~= nil then
+                    return parsed
                 end
             end
         end
     end
+    return fallback
+end
+
+local function parseFieldBoolByRowIndex(dialogText, rowIndex, fallback)
+    local wanted = tonumber(rowIndex)
+    if wanted == nil then
+        return fallback
+    end
+    wanted = math.max(0, math.floor(wanted))
+    local currentIndex = 0
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        if line ~= "" then
+            if currentIndex == wanted then
+                local parsed = parseBoolFromValueText(line)
+                if parsed ~= nil then
+                    return parsed
+                end
+                break
+            end
+            currentIndex = currentIndex + 1
+        end
+    end
+    return fallback
+end
+
+local function parseDamageAllowed(dialogText, fallback)
+    local positive = parseFieldBoolByAliases(dialogText, {
+        "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ",
+        "УРОН ДРУГИМ ИГРОКАМ",
+        "УРОН ПО ИГРОКАМ"
+    }, nil)
+    if positive ~= nil then
+        return positive
+    end
+
+    local negative = parseFieldBoolByAliases(dialogText, {
+        "ЗАПРЕТ УРОНА ПО ИГРОКАМ"
+    }, nil)
+    if negative ~= nil then
+        return not negative
+    end
+
     return fallback
 end
 
@@ -1265,7 +1375,8 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     end
 
     if eventAutomation.mode == "set_spawn" and eventAutomation.stage == "spawn_pick_slot" and (style == 2 or style == 4 or style == 5) then
-        sampSendDialogResponse(dialogId, 1, 0, "")
+        local spawnSlotLine = resolveDialogLineBySlot(text, eventAutomation.slot)
+        sampSendDialogResponse(dialogId, 1, spawnSlotLine, "")
         eventAutomation.stage = "spawn_confirm_replace"
         return false
     end
@@ -1319,11 +1430,41 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         else
             imgui.StrCopy(eventPassword, "0")
         end
-        eventRepeatTp[0] = parseFieldBoolByAliases(text, { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, eventRepeatTp[0])
-        eventAllowDamage[0] = not parseFieldBoolByAliases(text, { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "УРОН ПО ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, not eventAllowDamage[0])
-        eventAccessoryEffect[0] = parseFieldBoolByAliases(text, { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОН" }, eventAccessoryEffect[0])
-        eventGuards[0] = parseFieldBoolByAliases(text, { "ОХРАННИКИ" }, eventGuards[0])
-        eventPlayerCollision[0] = parseFieldBoolByAliases(text, { "КОЛЛИЗИЯ ИГРОКОВ" }, eventPlayerCollision[0])
+        do
+            local parsed = parseFieldBoolByAliases(text, { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, nil)
+            if parsed == nil then
+                parsed = parseFieldBoolByRowIndex(text, EVENT_MENU_INDEX.REPEAT_TP, eventRepeatTp[0])
+            end
+            eventRepeatTp[0] = parsed
+        end
+        do
+            local parsed = parseDamageAllowed(text, nil)
+            if parsed == nil then
+                parsed = parseFieldBoolByRowIndex(text, EVENT_MENU_INDEX.DAMAGE_PLAYERS, eventAllowDamage[0])
+            end
+            eventAllowDamage[0] = parsed
+        end
+        do
+            local parsed = parseFieldBoolByAliases(text, { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОН" }, nil)
+            if parsed == nil then
+                parsed = parseFieldBoolByRowIndex(text, EVENT_MENU_INDEX.ACCESSORY_EFFECT, eventAccessoryEffect[0])
+            end
+            eventAccessoryEffect[0] = parsed
+        end
+        do
+            local parsed = parseFieldBoolByAliases(text, { "ОХРАННИКИ" }, nil)
+            if parsed == nil then
+                parsed = parseFieldBoolByRowIndex(text, EVENT_MENU_INDEX.GUARDS, eventGuards[0])
+            end
+            eventGuards[0] = parsed
+        end
+        do
+            local parsed = parseFieldBoolByAliases(text, { "КОЛЛИЗИЯ ИГРОКОВ" }, nil)
+            if parsed == nil then
+                parsed = parseFieldBoolByRowIndex(text, EVENT_MENU_INDEX.PLAYER_COLLISION, eventPlayerCollision[0])
+            end
+            eventPlayerCollision[0] = parsed
+        end
         eventAutomation.active = false
         sampSendDialogResponse(dialogId, 0, 0, "")
         return false
@@ -1343,7 +1484,7 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
             }
             eventAutomation.toggleSteps = {
                 { index = EVENT_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", aliases = { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, target = eventRepeatTp[0] },
-                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "УРОН ПО ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, target = not eventAllowDamage[0] },
+                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "УРОН ПО ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, parser = parseDamageAllowed, target = eventAllowDamage[0] },
                 { index = EVENT_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", aliases = { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОН" }, target = eventAccessoryEffect[0] },
                 { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", aliases = { "ОХРАННИКИ" }, target = eventGuards[0] },
                 { index = EVENT_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", aliases = { "КОЛЛИЗИЯ ИГРОКОВ" }, target = eventPlayerCollision[0] }
@@ -1360,11 +1501,42 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
 
         while eventAutomation.toggleStep <= #eventAutomation.toggleSteps do
             local step = eventAutomation.toggleSteps[eventAutomation.toggleStep]
-            eventAutomation.toggleStep = eventAutomation.toggleStep + 1
-            local currentValue = parseFieldBoolByAliases(text, step.aliases or { step.name }, nil)
+            local toggleIndex = step.index
+            local toggleLine = nil
+            if step.aliases then
+                local resolvedIndex, resolvedLine = findDialogRowByAliases(text, step.aliases)
+                if resolvedIndex ~= nil then
+                    toggleIndex = resolvedIndex
+                    toggleLine = resolvedLine
+                end
+            end
+            local currentValue = nil
+            if step.parser then
+                currentValue = step.parser(text, nil)
+                if currentValue == nil then
+                    if toggleLine then
+                        currentValue = parseBoolFromValueText(toggleLine)
+                    end
+                end
+                if currentValue == nil then
+                    currentValue = parseFieldBoolByRowIndex(text, toggleIndex, nil)
+                end
+            else
+                if toggleLine then
+                    currentValue = parseBoolFromValueText(toggleLine)
+                end
+                if currentValue == nil then
+                    currentValue = parseFieldBoolByAliases(text, step.aliases or { step.name }, nil)
+                end
+                if currentValue == nil then
+                    currentValue = parseFieldBoolByRowIndex(text, toggleIndex, nil)
+                end
+            end
             if currentValue ~= nil and currentValue ~= step.target then
+                sampSendDialogResponse(dialogId, 1, toggleIndex, "")
                 return false
             end
+            eventAutomation.toggleStep = eventAutomation.toggleStep + 1
         end
 
         if eventAutomation.stage ~= "saved" then
