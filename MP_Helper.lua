@@ -283,8 +283,10 @@ local eventRepeatTp = imgui.new.bool(false)
 local eventAllowDamage = imgui.new.bool(false)
 local eventAccessoryEffect = imgui.new.bool(false)
 local eventGuards = imgui.new.bool(false)
+local eventPlayerCollision = imgui.new.bool(true)
 local eventSpawnApplied = false
 local eventSpawnStatusText = u8("Позиция: Не установлено")
+local eventSpawnStatusColor = imgui.ImVec4(0.85, 0.35, 0.35, 1.0)
 local eventAutomation = {
     active = false,
     mode = nil,
@@ -312,6 +314,7 @@ local EVENT_MENU_INDEX = {
     DAMAGE_PLAYERS = 15,
     ACCESSORY_EFFECT = 16,
     GUARDS = 17,
+    PLAYER_COLLISION = 24,
     START_EVENT = 25,
     SAVE_CHANGES = 26
 }
@@ -327,16 +330,24 @@ local function normalizeDialogText(value)
 end
 
 local function resolveDialogLineBySlot(dialogText, slotId)
-    local target = "[" .. tostring(slotId) .. "]"
+    local target = tostring(slotId)
     local lineIndex = 0
+    local selectableSlotIndex = 0
     for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
         local line = normalizeDialogText(rawLine)
-        if line:find(target, 1, true) then
+        local lineSlot = line:match("%[(%d+)%]")
+        if lineSlot and tonumber(lineSlot) == tonumber(slotId) then
+            return selectableSlotIndex
+        end
+        if lineSlot then
+            selectableSlotIndex = selectableSlotIndex + 1
+        end
+        if line:find("ID " .. target, 1, true) or line:find("СЛОТ " .. target, 1, true) or line:find("[" .. target .. "]", 1, true) then
             return lineIndex
         end
         lineIndex = lineIndex + 1
     end
-    return math.max(0, slotId)
+    return math.max(0, tonumber(slotId) or 0)
 end
 
 local function clampEventValues()
@@ -384,7 +395,31 @@ local function startEventAutomation(mode)
     eventAutomation.slot = slotId
     eventAutomation.loading = (mode == "load")
     eventAutomation.pendingInput = nil
+    if mode == "set_spawn" then
+        eventSpawnApplied = false
+        eventSpawnStatusText = u8("Позиция: Выполняется сохранение...")
+        eventSpawnStatusColor = imgui.ImVec4(0.95, 0.80, 0.20, 1.0)
+    end
     sampSendChat("/eventmenu")
+end
+
+local function resolveDialogLineByKeywords(dialogText, keywords, fallbackIndex)
+    local lineIndex = 0
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        local matched = true
+        for _, keyword in ipairs(keywords) do
+            if not line:find(keyword, 1, true) then
+                matched = false
+                break
+            end
+        end
+        if matched then
+            return lineIndex
+        end
+        lineIndex = lineIndex + 1
+    end
+    return fallbackIndex or 0
 end
 
 local function parseFieldValue(dialogText, fieldName)
@@ -394,6 +429,42 @@ local function parseFieldValue(dialogText, fieldName)
         return value:upper()
     end
     return ""
+end
+
+local function parseFieldNumberByAliases(dialogText, aliases, fallback)
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        for _, alias in ipairs(aliases) do
+            if line:find(alias, 1, true) then
+                local afterColon = line:match(":%s*([%-]?%d+)")
+                if afterColon then
+                    return tonumber(afterColon) or fallback
+                end
+                local anyNumber = line:match("([%-]?%d+)")
+                if anyNumber then
+                    return tonumber(anyNumber) or fallback
+                end
+            end
+        end
+    end
+    return fallback
+end
+
+local function parseFieldBoolByAliases(dialogText, aliases, fallback)
+    for rawLine in tostring(dialogText or ""):gmatch("[^\r\n]+") do
+        local line = normalizeDialogText(rawLine)
+        for _, alias in ipairs(aliases) do
+            if line:find(alias, 1, true) then
+                if line:find("ДА", 1, true) or line:find("РАЗРЕШ", 1, true) then
+                    return true
+                end
+                if line:find("НЕТ", 1, true) or line:find("ЗАПРЕЩ", 1, true) then
+                    return false
+                end
+            end
+        end
+    end
+    return fallback
 end
 
 local function needsToggle(dialogText, fieldName, targetYes)
@@ -407,7 +478,7 @@ end
 local tkInfo = {};
 
 
-local tag = "[ MPHelper ] "
+local tag = "[ Event Helper ] "
 local tagcolor = 0xCC4545
 local textcolor = "{FFFFFF}"
 local warncolor = "{FFFFFF}"
@@ -820,7 +891,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
             sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе выключен.", tagcolor)
         end
     end
-    local bottomTitleTop = u8("MPHelper")
+    local bottomTitleTop = u8("Event Helper")
     local bottomY = math.max(imgui.GetCursorPosY(), imgui.GetWindowHeight() - 30)
     imgui.SetCursorPosY(bottomY)
     imgui.SetCursorPosX(leftColumnStartX + math.max((leftColumnWidth - imgui.CalcTextSize(bottomTitleTop).x) / 2, 0))
@@ -1091,7 +1162,7 @@ imgui.OnFrame(function() return eventConfigWindow[0] end, function()
         startEventAutomation("set_spawn")
     end
     imgui.SetCursorPosY(imgui.GetCursorPosY() + 3)
-    imgui.Text(eventSpawnStatusText)
+    imgui.TextColored(eventSpawnStatusColor, eventSpawnStatusText)
 
     imgui.PushItemWidth(120)
     imgui.InputInt(u8'Лимит игроков', eventPlayerLimit, 0, 0)
@@ -1108,6 +1179,7 @@ imgui.OnFrame(function() return eventConfigWindow[0] end, function()
     imgui.Checkbox(u8'Нанесение урона другим игрокам', eventAllowDamage)
     imgui.Checkbox(u8'Эффект от аксессуаров', eventAccessoryEffect)
     imgui.Checkbox(u8'Охранники', eventGuards)
+    imgui.Checkbox(u8'Коллизия игроков', eventPlayerCollision)
 
     imgui.Separator()
     if addons.MaterialButton(u8'Применить настройки', imgui.ImVec2(190, 28)) then
@@ -1140,23 +1212,41 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         return false
     end
 
-    if decodedTitle:find("ПОЗИЦ", 1, true) and decodedTitle:find("СПАВН", 1, true) and eventAutomation.mode == "set_spawn" then
-        sampSendDialogResponse(dialogId, 1, 2, "")
-        eventAutomation.stage = "spawn_pick_first"
+    if eventAutomation.mode == "set_spawn" and decodedTitle:find("РЕДАКТИРОВАН", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true) then
+        local spawnLine = resolveDialogLineByKeywords(text, { "ПОЗИЦ", "СПАВН" }, EVENT_MENU_INDEX.SPAWN_POS)
+        sampSendDialogResponse(dialogId, 1, spawnLine, "")
+        eventAutomation.stage = "spawn_manage"
         return false
     end
 
-    if eventAutomation.mode == "set_spawn" and eventAutomation.stage == "spawn_pick_first" and decodedTitle:find("ПОЗИЦ", 1, true) and not decodedTitle:find("СПАВН", 1, true) then
+    if eventAutomation.mode == "set_spawn" and decodedTitle:find("УПРАВЛЕНИЕ", 1, true) and decodedTitle:find("ПОЗИЦ", 1, true) then
+        local editPosLine = resolveDialogLineByKeywords(text, { "РЕДАКТИРОВАТЬ", "ПОЗИЦ" }, 2)
+        sampSendDialogResponse(dialogId, 1, editPosLine, "")
+        eventAutomation.stage = "spawn_pick_slot"
+        return false
+    end
+
+    if eventAutomation.mode == "set_spawn" and decodedTitle:find("НАЖМИТЕ НА ПОЗИЦ", 1, true) then
+        local firstSpawnLine = resolveDialogLineBySlot(text, 1)
+        sampSendDialogResponse(dialogId, 1, firstSpawnLine, "")
+        eventAutomation.stage = "spawn_confirm_replace"
+        return false
+    end
+
+    if eventAutomation.mode == "set_spawn" and eventAutomation.stage == "spawn_confirm_replace" and (decodedButton1:find("ЗАМЕНИТЬ", 1, true) or decodedButton1:find("ИЗМЕНИТЬ", 1, true)) then
         sampSendDialogResponse(dialogId, 1, 0, "")
         eventSpawnApplied = true
         eventSpawnStatusText = u8("Позиция: Установлено")
+        eventSpawnStatusColor = imgui.ImVec4(0.20, 0.85, 0.30, 1.0)
         eventAutomation.active = false
-        sampAddChatMessage(tag .. textcolor .. "Позиция спавна установлена для слота " .. eventAutomation.slot .. ".", tagcolor)
+        sampAddChatMessage(tag .. textcolor .. "Позиция спавна успешно сохранена для слота " .. eventAutomation.slot .. ".", tagcolor)
         return false
     end
 
-    if eventAutomation.mode == "set_spawn" and decodedButton1:find("ИЗМЕНИТЬ", 1, true) then
-        sampSendDialogResponse(dialogId, 1, 0, "")
+    if eventAutomation.pendingInput ~= nil and (style == 1 or decodedButton1:find("ИЗМЕНИТЬ", 1, true) or decodedButton1:find("ЗАМЕНИТЬ", 1, true)) then
+        local value = eventAutomation.pendingInput
+        eventAutomation.pendingInput = nil
+        sampSendDialogResponse(dialogId, 1, 0, value)
         return false
     end
 
@@ -1166,36 +1256,36 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     end
 
     if eventAutomation.mode == "load" then
-        eventPlayerLimit[0] = tonumber(parseFieldValue(decodedText, "ЛИМИТ ИГРОКОВ"):match("%d+")) or 0
-        eventTeleportTime[0] = tonumber(parseFieldValue(decodedText, "ВРЕМЯ ДЕЙСТВИЯ ТЕЛЕПОРТА"):match("%d+")) or 0
-        eventHp[0] = tonumber(parseFieldValue(decodedText, "ВЫДАТЬ ЗДОРОВЬЕ"):match("%d+")) or 0
-        eventArmour[0] = tonumber(parseFieldValue(decodedText, "ВЫДАТЬ БРОНЮ"):match("%d+")) or 0
-        eventSkin[0] = tonumber(parseFieldValue(decodedText, "ВЫДАТЬ СКИН"):match("%d+")) or 0
-        imgui.StrCopy(eventPassword, "0")
-        eventRepeatTp[0] = parseFieldValue(decodedText, "ПОВТОРНЫЙ ТЕЛЕПОРТ"):find("ДА", 1, true) ~= nil
-        eventAllowDamage[0] = not (parseFieldValue(decodedText, "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ"):find("ДА", 1, true) ~= nil)
-        eventAccessoryEffect[0] = parseFieldValue(decodedText, "ЭФФЕКТЫ ОТ АКСЕССУАРОВ"):find("ДА", 1, true) ~= nil
-        eventGuards[0] = not (parseFieldValue(decodedText, "ОХРАННИКИ"):find("ДА", 1, true) ~= nil)
+        eventPlayerLimit[0] = parseFieldNumberByAliases(decodedText, { "ЛИМИТ ИГРОКОВ" }, eventPlayerLimit[0])
+        eventTeleportTime[0] = parseFieldNumberByAliases(decodedText, { "ВРЕМЯ ДЕЙСТВИЯ ТЕЛЕПОРТА", "ВРЕМЯ ТЕЛЕПОРТА" }, eventTeleportTime[0])
+        eventHp[0] = parseFieldNumberByAliases(decodedText, { "ВЫДАТЬ ЗДОРОВЬЕ", "ЗДОРОВЬЕ" }, eventHp[0])
+        eventArmour[0] = parseFieldNumberByAliases(decodedText, { "ВЫДАТЬ БРОНЮ", "ВЫДАТЬ БРОНЬ", "БРОНЯ", "БРОНЬ" }, eventArmour[0])
+        eventSkin[0] = parseFieldNumberByAliases(decodedText, { "ВЫДАТЬ СКИН", "СКИН" }, eventSkin[0])
+        local loadedPassword = parseFieldValue(decodedText, "ПАРОЛЬ")
+        if loadedPassword ~= "" then
+            imgui.StrCopy(eventPassword, loadedPassword:gsub("%s+", ""))
+        else
+            imgui.StrCopy(eventPassword, "0")
+        end
+        eventRepeatTp[0] = parseFieldBoolByAliases(decodedText, { "ПОВТОРНЫЙ ТЕЛЕПОРТ" }, eventRepeatTp[0])
+        eventAllowDamage[0] = parseFieldBoolByAliases(decodedText, { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ" }, eventAllowDamage[0])
+        eventAccessoryEffect[0] = parseFieldBoolByAliases(decodedText, { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ" }, eventAccessoryEffect[0])
+        eventGuards[0] = not parseFieldBoolByAliases(decodedText, { "ОХРАННИКИ" }, not eventGuards[0])
+        eventPlayerCollision[0] = parseFieldBoolByAliases(decodedText, { "КОЛЛИЗИЯ ИГРОКОВ" }, eventPlayerCollision[0])
         eventAutomation.active = false
         sampSendDialogResponse(dialogId, 0, 0, "")
         return false
     end
 
     if eventAutomation.mode == "set_spawn" then
-        sampSendDialogResponse(dialogId, 1, EVENT_MENU_INDEX.SPAWN_POS, "")
+        local spawnLine = resolveDialogLineByKeywords(text, { "ПОЗИЦ", "СПАВН" }, EVENT_MENU_INDEX.SPAWN_POS)
+        sampSendDialogResponse(dialogId, 1, spawnLine, "")
         return false
     end
 
     if eventAutomation.mode == "apply" or eventAutomation.mode == "apply_and_start" then
-        if eventAutomation.pendingInput ~= nil and decodedButton1:find("ИЗМЕНИТЬ", 1, true) then
-            local value = eventAutomation.pendingInput
-            eventAutomation.pendingInput = nil
-            sampSendDialogResponse(dialogId, 1, 0, value)
-            return false
-        end
-
         if #eventAutomation.valueSteps == 0 then
-            local messageText = '/ao Проходит МП "' .. u8:decode(str(mp.name)) .. '". Приз: "' .. formatPrize(u8:decode(str(mp.priz))) .. '" Для участия вводите /gotp'
+            local messageText = 'Проходит МП "' .. u8:decode(str(mp.name)) .. '". Приз: "' .. formatPrize(u8:decode(str(mp.priz))) .. '" Для участия вводите /gotp'
             eventAutomation.valueSteps = {
                 { index = EVENT_MENU_INDEX.BROADCAST, input = messageText },
                 { index = EVENT_MENU_INDEX.PLAYER_LIMIT, input = tostring(eventPlayerLimit[0]) },
@@ -1207,9 +1297,10 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
             }
             eventAutomation.toggleSteps = {
                 { index = EVENT_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", target = eventRepeatTp[0] },
-                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", target = not eventAllowDamage[0] },
+                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", target = eventAllowDamage[0] },
                 { index = EVENT_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", target = eventAccessoryEffect[0] },
-                { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", target = not eventGuards[0] }
+                { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", target = not eventGuards[0] },
+                { index = EVENT_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", target = eventPlayerCollision[0] }
             }
         end
 
@@ -1244,9 +1335,11 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         eventAutomation.toggleSteps = {}
         eventAutomation.valueStep = 1
         eventAutomation.toggleStep = 1
-        sampAddChatMessage(tag .. textcolor .. "Настройки МП применены для слота " .. eventAutomation.slot .. ".", tagcolor)
+        sampAddChatMessage(tag .. textcolor .. "Настройки успешно применены для слота " .. eventAutomation.slot .. ".", tagcolor)
         return false
     end
+
+    return false
 end
 
 
