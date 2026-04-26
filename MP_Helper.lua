@@ -297,6 +297,7 @@ local eventSpawnStatusText = u8("Позиция: Не установлено")
 local eventSpawnStatusColor = imgui.ImVec4(0.85, 0.35, 0.35, 1.0)
 local eventSpawnMessageSent = false
 local hideSpawnDialogsUntil = 0
+local hideEventDialogsUntil = 0
 local hiddenEventDialogsUntil = {}
 local eventAutomation = {
     active = false,
@@ -310,7 +311,9 @@ local eventAutomation = {
     slot = 0,
     loading = false,
     pendingInput = nil,
-    inRulesMenu = false
+    inRulesMenu = false,
+    broadcastText = nil,
+    startAttempts = 0
 }
 
 local EVENT_MENU_INDEX = {
@@ -413,8 +416,8 @@ end
 local function clampEventValues()
     eventPlayerLimit[0] = math.max(0, eventPlayerLimit[0])
     eventTeleportTime[0] = math.max(1, math.min(300, eventTeleportTime[0]))
-    eventHp[0] = math.max(5, math.min(250, eventHp[0]))
-    eventArmour[0] = math.max(5, math.min(250, eventArmour[0]))
+    eventHp[0] = math.max(0, math.min(250, eventHp[0]))
+    eventArmour[0] = math.max(0, math.min(250, eventArmour[0]))
     eventSkin[0] = math.max(0, eventSkin[0])
 end
 
@@ -437,7 +440,7 @@ local function getEventSlotId()
     return num
 end
 
-local function startEventAutomation(mode)
+local function startEventAutomation(mode, aoText)
     clampEventValues()
     local slotId = getEventSlotId()
     if slotId == nil then
@@ -459,6 +462,11 @@ local function startEventAutomation(mode)
     eventAutomation.loading = (mode == "load")
     eventAutomation.pendingInput = nil
     eventAutomation.inRulesMenu = false
+    eventAutomation.broadcastText = aoText
+    eventAutomation.startAttempts = 0
+    if mode == "apply" or mode == "apply_and_start" then
+        hideEventDialogsUntil = os.clock() + 8
+    end
     if mode == "set_spawn" then
         eventSpawnApplied = false
         eventSpawnMessageSent = false
@@ -565,9 +573,11 @@ local function parseBoolFromValueText(valuePart)
     if value:find("ДА", 1, true)
         or value:find("РАЗРЕШ", 1, true)
         or value:find("ВКЛ", 1, true)
+        or value:find("ВКЛЮЧ", 1, true)
         or value:find("ON", 1, true)
         or value:find("TRUE", 1, true)
         or value:find("АКТИВ", 1, true)
+        or value:find("ENABLE", 1, true)
         or value:find("[+]", 1, true)
         or value:find("(+)", 1, true) then
         return true
@@ -580,6 +590,8 @@ local function parseBoolFromValueText(valuePart)
         or value:find("FALSE", 1, true)
         or value:find("НЕАКТИВ", 1, true)
         or value:find("ОТКЛ", 1, true)
+        or value:find("ВЫКЛЮЧ", 1, true)
+        or value:find("DISABLE", 1, true)
         or value:find("[-]", 1, true)
         or value:find("(-)", 1, true) then
         return false
@@ -663,6 +675,15 @@ local function isEventAutomationDialog(titleText, bodyText)
         or body:find("КОЛЛИЗ", 1, true)
 
     return titleLooksEvent or bodyLooksEvent
+end
+
+local function dialogHasRuleRows(dialogText, steps)
+    for _, step in ipairs(steps or {}) do
+        if resolveDialogLineByAliases(dialogText, step.aliases or {}, nil) ~= nil then
+            return true
+        end
+    end
+    return false
 end
 
 local function needsToggle(dialogText, fieldName, targetYes)
@@ -1278,7 +1299,7 @@ if page == 3 then
     local formattedPrize = formatPrize(u8:decode(str(mp.priz)))
     imgui.StrCopy(mp.result,
         u8(mp.type[0] == 0 and
-        '/ao [Event] Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..formattedPrize..'" Для участия вводите /gotp' or
+        '/c [Event] Проходит МП "'..u8:decode(str(mp.name))..'". Приз: "'..formattedPrize..'" Для участия вводите /gotp' or
         '/ao [Event] Уважаемые игроки, сейчас пройдет мероприятие "'..u8:decode(str(mp.name))..'"\n/ao [Event] Приз: "'..formattedPrize..'"\n/ao [Event] Прописывайте /gotp и присоединяйтесь к мероприятию')
     )
 
@@ -1290,14 +1311,7 @@ if page == 3 then
     imgui.Spacing()
     if addons.AnimButton(u8'Отправить /ao') then
         local text = u8:decode(str(mp.result))
-
-        lua_thread.create(function()
-            for line in text:gmatch('[^\n]+') do
-                sampSendChat(line)
-                wait(1100)
-            end
-        end)
-        startEventAutomation("apply_and_start")
+        startEventAutomation("start_with_ao", text)
     end
 end
 if page == 4 then
@@ -1410,6 +1424,9 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     if now < hideSpawnDialogsUntil and not eventAutomation.active then
         return false
     end
+    if now < hideEventDialogsUntil and not eventAutomation.active then
+        return false
+    end
 
     if not eventAutomation.active then
         return
@@ -1485,6 +1502,109 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
 
     local isRulesMenuDialog = eventAutomation.inRulesMenu and isListStyle
 
+    if eventAutomation.mode == "start_only" or eventAutomation.mode == "start_with_ao" then
+        if eventAutomation.stage == "edit_menu" and isListStyle then
+            local startLine = resolveDialogLineByAliases(text, {
+                "ЗАПУСТИТЬ ЭТО МЕРОПРИЯТИЕ",
+                "ЗАПУСТИТЬ МЕРОПРИЯТИЕ",
+                "ЗАПУСТИТЬ",
+                "НАЧАТЬ МЕРОПРИЯТИЕ",
+                "СТАРТ МЕРОПРИЯТИЯ"
+            }, nil)
+            if startLine == nil then
+                startLine = resolveDialogLineByKeywords(text, { "ЗАПУСТ" }, EVENT_MENU_INDEX.START_EVENT)
+            end
+
+            if startLine ~= nil then
+                local currentDialogId = dialogId
+                lua_thread.create(function()
+                    local triedRows = {}
+                    for _, rowIndex in ipairs({ startLine, EVENT_MENU_INDEX.START_EVENT, RULES_MENU_INDEX.START_EVENT }) do
+                        if rowIndex ~= nil and not triedRows[rowIndex] then
+                            triedRows[rowIndex] = true
+                            sampSendDialogResponse(currentDialogId, 1, rowIndex, "")
+                            wait(120)
+                        end
+                    end
+                end)
+                eventAutomation.startAttempts = eventAutomation.startAttempts + 1
+                eventAutomation.stage = "start_confirm"
+                return false
+            end
+        end
+
+        if eventAutomation.stage == "start_confirm" then
+            local hasConfirmStep = style == 1
+                or decodedTitle:find("ПОДТВЕР", 1, true)
+                or decodedButton1:find("ДА", 1, true)
+                or decodedButton1:find("ПОДТВЕР", 1, true)
+            local startRowStillExists = isListStyle and resolveDialogLineByAliases(text, {
+                "ЗАПУСТИТЬ ЭТО МЕРОПРИЯТИЕ",
+                "ЗАПУСТИТЬ МЕРОПРИЯТИЕ",
+                "ЗАПУСТИТЬ"
+            }, nil) ~= nil
+
+            if hasConfirmStep then
+                sampSendDialogResponse(dialogId, 1, 0, "")
+            elseif startRowStillExists and eventAutomation.startAttempts < 3 then
+                local retryStartLine = resolveDialogLineByAliases(text, {
+                    "ЗАПУСТИТЬ ЭТО МЕРОПРИЯТИЕ",
+                    "ЗАПУСТИТЬ МЕРОПРИЯТИЕ",
+                    "ЗАПУСТИТЬ",
+                    "НАЧАТЬ МЕРОПРИЯТИЕ",
+                    "СТАРТ МЕРОПРИЯТИЯ"
+                }, nil)
+                if retryStartLine == nil then
+                    retryStartLine = resolveDialogLineByKeywords(text, { "ЗАПУСТ" }, EVENT_MENU_INDEX.START_EVENT)
+                end
+                if retryStartLine ~= nil then
+                    local retryDialogId = dialogId
+                    lua_thread.create(function()
+                        local triedRows = {}
+                        for _, rowIndex in ipairs({ retryStartLine, EVENT_MENU_INDEX.START_EVENT, RULES_MENU_INDEX.START_EVENT }) do
+                            if rowIndex ~= nil and not triedRows[rowIndex] then
+                                triedRows[rowIndex] = true
+                                sampSendDialogResponse(retryDialogId, 1, rowIndex, "")
+                                wait(120)
+                            end
+                        end
+                    end)
+                    eventAutomation.startAttempts = eventAutomation.startAttempts + 1
+                    return false
+                end
+            elseif startRowStillExists then
+                eventAutomation.active = false
+                eventAutomation.inRulesMenu = false
+                eventAutomation.broadcastText = nil
+                scriptChatMessage("Не удалось запустить МП: кнопка запуска не сработала.")
+                return false
+            end
+
+            local shouldSendAo = eventAutomation.mode == "start_with_ao" and tostring(eventAutomation.broadcastText or "") ~= ""
+            local aoText = eventAutomation.broadcastText
+            local launchConfirmed = decodedTitle:find("ЗАПУЩ", 1, true) ~= nil
+                or decodedText:find("ЗАПУЩ", 1, true) ~= nil
+                or decodedText:find("УСПЕШ", 1, true) ~= nil
+            eventAutomation.active = false
+            eventAutomation.inRulesMenu = false
+            eventAutomation.broadcastText = nil
+            if shouldSendAo and launchConfirmed then
+                lua_thread.create(function()
+                    for line in tostring(aoText):gmatch("[^\n]+") do
+                        sampSendChat(line)
+                        wait(1100)
+                    end
+                end)
+                scriptChatMessage("МП запускается, /ao отправлен.")
+            elseif shouldSendAo then
+                scriptChatMessage("МП не подтверждено как запущенное, /ao не отправлен.")
+            else
+                scriptChatMessage("Команда запуска МП отправлена.")
+            end
+            return false
+        end
+    end
+
     if eventAutomation.mode == "load" then
         if not ((eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true)) or isEditDialog) then
             return false
@@ -1557,11 +1677,11 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
                 { name = "ВЫДАТЬ СКИН", index = EVENT_MENU_INDEX.SKIN, input = tostring(eventSkin[0]) }
             }
             eventAutomation.toggleSteps = {
-                { index = RULES_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", aliases = { "ПОВТОРНЫЙ ТЕЛЕПОРТ", "ПОВТОР ТЕЛЕПОРТА" }, target = eventRepeatTp[0] },
-                { index = RULES_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, parser = parseDamageAllowed, target = eventAllowDamage[0] },
-                { index = RULES_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", aliases = { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ" }, target = eventAccessoryEffect[0] },
-                { index = RULES_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", aliases = { "ОХРАННИКИ" }, target = eventGuards[0] },
-                { index = RULES_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", aliases = { "КОЛЛИЗИЯ ИГРОКОВ", "КОЛЛИЗИЯ" }, target = eventPlayerCollision[0] }
+                { index = EVENT_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", aliases = { "ПОВТОРНЫЙ ТЕЛЕПОРТ", "ПОВТОР ТЕЛЕПОРТА" }, target = eventRepeatTp[0] },
+                { index = EVENT_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, parser = parseDamageAllowed, target = eventAllowDamage[0] },
+                { index = EVENT_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", aliases = { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ" }, target = eventAccessoryEffect[0] },
+                { index = EVENT_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", aliases = { "ОХРАННИКИ" }, target = eventGuards[0] },
+                { index = EVENT_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", aliases = { "КОЛЛИЗИЯ ИГРОКОВ", "КОЛЛИЗИЯ" }, target = eventPlayerCollision[0] }
             }
         end
 
@@ -1573,7 +1693,8 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
             return false
         end
 
-        if not eventAutomation.inRulesMenu then
+        local hasRuleRowsHere = dialogHasRuleRows(text, eventAutomation.toggleSteps)
+        if not hasRuleRowsHere and not eventAutomation.inRulesMenu then
             eventAutomation.inRulesMenu = true
             sampSendDialogResponse(dialogId, 1, EVENT_MENU_INDEX.RULES_MENU, "")
             return false
@@ -1597,7 +1718,9 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
             if currentValue == nil then
                 currentValue = parseFieldBoolByRowIndex(text, rowIndex, nil)
             end
-            if currentValue ~= nil and currentValue ~= step.target then
+            if currentValue == nil and step.target == true then
+                table.insert(toggleClicks, rowIndex)
+            elseif currentValue ~= nil and currentValue ~= step.target then
                 table.insert(toggleClicks, rowIndex)
             end
         end
@@ -1611,12 +1734,14 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
         eventAutomation.inRulesMenu = false
 
         lua_thread.create(function()
+            hideEventDialogsUntil = os.clock() + 6
             for _, rowIndex in ipairs(toggleClicks) do
                 sampSendDialogResponse(dialogId, 1, rowIndex, "")
                 wait(120)
             end
             if needStartEvent then
-                sampSendDialogResponse(dialogId, 1, RULES_MENU_INDEX.START_EVENT, "")
+                wait(250)
+                startEventAutomation("start_only")
             end
             scriptChatMessage("Настройки успешно применены.")
         end)
