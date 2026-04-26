@@ -297,6 +297,7 @@ local eventSpawnStatusText = u8("Позиция: Не установлено")
 local eventSpawnStatusColor = imgui.ImVec4(0.85, 0.35, 0.35, 1.0)
 local eventSpawnMessageSent = false
 local hideSpawnDialogsUntil = 0
+local hiddenEventDialogsUntil = {}
 local eventAutomation = {
     active = false,
     mode = nil,
@@ -644,6 +645,24 @@ local function parseDamageAllowed(dialogText, fallback)
     end
 
     return fallback
+end
+
+local function isEventAutomationDialog(titleText, bodyText)
+    local title = normalizeDialogText(titleText)
+    local body = normalizeDialogText(bodyText)
+
+    local titleLooksEvent = title:find("МЕРОПРИЯТ", 1, true)
+        or title:find("СПАВ", 1, true)
+        or title:find("ПРАВИЛ", 1, true)
+        or title:find("РЕДАКТИРОВАН", 1, true)
+
+    local bodyLooksEvent = body:find("МЕРОПРИЯТ", 1, true)
+        or body:find("ПОЗИЦ", 1, true)
+        or body:find("СПАВ", 1, true)
+        or body:find("ПОВТОР", 1, true)
+        or body:find("КОЛЛИЗ", 1, true)
+
+    return titleLooksEvent or bodyLooksEvent
 end
 
 local function needsToggle(dialogText, fieldName, targetYes)
@@ -1365,12 +1384,23 @@ end)
 
 function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     local decodedTitle = normalizeDialogText(title)
-    if os.clock() < hideSpawnDialogsUntil then
-        local isSpawnDialog = decodedTitle:find("ПОЗИЦ", 1, true) and decodedTitle:find("СПАВ", 1, true)
-        local isEventDialog = decodedTitle:find("МЕРОПРИЯТ", 1, true) ~= nil
-        if isSpawnDialog or isEventDialog then
-            return false
-        end
+    local now = os.clock()
+    local dialogIsEvent = isEventAutomationDialog(title, text)
+
+    if eventAutomation.active and dialogIsEvent then
+        hiddenEventDialogsUntil[dialogId] = now + 10
+    end
+
+    if hiddenEventDialogsUntil[dialogId] and hiddenEventDialogsUntil[dialogId] < now then
+        hiddenEventDialogsUntil[dialogId] = nil
+    end
+
+    if not eventAutomation.active and hiddenEventDialogsUntil[dialogId] then
+        return false
+    end
+
+    if now < hideSpawnDialogsUntil and not eventAutomation.active then
+        return false
     end
 
     if not eventAutomation.active then
@@ -1445,12 +1475,15 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     local isEditDialog = decodedTitle:find("РЕДАКТИРОВАН", 1, true) and decodedTitle:find("МЕРОПРИЯТ", 1, true)
     local isListStyle = (style == 2 or style == 4 or style == 5)
 
+    local isRulesMenuDialog = eventAutomation.inRulesMenu and isListStyle
+
     if eventAutomation.mode == "load" then
         if not ((eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true)) or isEditDialog) then
             return false
         end
     else
-        if eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true) then
+        if isRulesMenuDialog then
+        elseif eventAutomation.stage == "edit_menu" and isListStyle and not decodedTitle:find("СПИСОК", 1, true) then
         elseif not isEditDialog then
             return false
         end
@@ -1516,11 +1549,11 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
                 { name = "ВЫДАТЬ СКИН", index = EVENT_MENU_INDEX.SKIN, input = tostring(eventSkin[0]) }
             }
             eventAutomation.toggleSteps = {
-                { index = RULES_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", target = eventRepeatTp[0] },
-                { index = RULES_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", parser = parseDamageAllowed, target = eventAllowDamage[0] },
-                { index = RULES_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", target = eventAccessoryEffect[0] },
-                { index = RULES_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", target = eventGuards[0] },
-                { index = RULES_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", target = eventPlayerCollision[0] }
+                { index = RULES_MENU_INDEX.REPEAT_TP, name = "ПОВТОРНЫЙ ТЕЛЕПОРТ", aliases = { "ПОВТОРНЫЙ ТЕЛЕПОРТ", "ПОВТОР ТЕЛЕПОРТА" }, target = eventRepeatTp[0] },
+                { index = RULES_MENU_INDEX.DAMAGE_PLAYERS, name = "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", aliases = { "НАНЕСЕНИЕ УРОНА ДРУГИМ ИГРОКАМ", "УРОН ДРУГИМ ИГРОКАМ", "ЗАПРЕТ УРОНА ПО ИГРОКАМ" }, parser = parseDamageAllowed, target = eventAllowDamage[0] },
+                { index = RULES_MENU_INDEX.ACCESSORY_EFFECT, name = "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", aliases = { "ЭФФЕКТЫ ОТ АКСЕССУАРОВ", "ЭФФЕКТ ОТ АКСЕССУАРОВ" }, target = eventAccessoryEffect[0] },
+                { index = RULES_MENU_INDEX.GUARDS, name = "ОХРАННИКИ", aliases = { "ОХРАННИКИ" }, target = eventGuards[0] },
+                { index = RULES_MENU_INDEX.PLAYER_COLLISION, name = "КОЛЛИЗИЯ ИГРОКОВ", aliases = { "КОЛЛИЗИЯ ИГРОКОВ", "КОЛЛИЗИЯ" }, target = eventPlayerCollision[0] }
             }
         end
 
@@ -1540,15 +1573,24 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
 
         local toggleClicks = {}
         for _, step in ipairs(eventAutomation.toggleSteps) do
+            local rowIndex = step.index
+            local rowByAlias = resolveDialogLineByAliases(text, step.aliases or {}, nil)
+            if rowByAlias ~= nil then
+                rowIndex = rowByAlias
+            end
+
             local currentValue = nil
             if step.parser then
                 currentValue = step.parser(text, nil)
             end
+            if currentValue == nil and step.aliases then
+                currentValue = parseFieldBoolByAliases(text, step.aliases, nil)
+            end
             if currentValue == nil then
-                currentValue = parseFieldBoolByRowIndex(text, step.index, nil)
+                currentValue = parseFieldBoolByRowIndex(text, rowIndex, nil)
             end
             if currentValue ~= nil and currentValue ~= step.target then
-                table.insert(toggleClicks, step.index)
+                table.insert(toggleClicks, rowIndex)
             end
         end
 
