@@ -25,6 +25,7 @@ local logoLoadTried = false
 local logoDrawSize = imgui.ImVec2(290, 124)
 local isMpSendInProgress = false
 local FIXED_TS_RADIUS = 400
+local scriptChatMessage
 
 local function getScriptDirectory()
     local scriptPath = thisScript().path or ""
@@ -142,7 +143,6 @@ function isIgnored(nick)
         eventAutomation.active = false
         eventSpawnStatusText = u8("Позиция: Не удалось автоустановить")
         eventSpawnStatusColor = imgui.ImVec4(0.90, 0.35, 0.35, 1.0)
-        sampAddChatMessage(tag .. textcolor .. "Не удалось автоматически установить позицию спавна. Откройте /eventmenu и повторите.", tagcolor)
         return
     end
 
@@ -175,7 +175,7 @@ function plvehall(ids)
     local clist = splitIds(ids)
 
     if #clist < 1 then
-        sampAddChatMessage("Введите ID транспорта!", -1)
+        scriptChatMessage("Введите ID транспорта!")
         return
     end
 
@@ -201,11 +201,11 @@ function plvehall(ids)
     end
 
     if #players == 0 then
-        sampAddChatMessage("Игроки в радиусе не найдены!", -1)
+        scriptChatMessage("Игроки в радиусе не найдены!")
         return
     end
 
-    sampAddChatMessage("Найдено игроков: "..#players, -1)
+    scriptChatMessage("Найдено игроков: "..#players)
 
     lua_thread.create(function()
         for _, player in pairs(players) do
@@ -216,7 +216,7 @@ function plvehall(ids)
                 wait(mainIni.settings.delay)
             end
         end
-        sampAddChatMessage("Т/С выданы всем игрокам!", -1)
+        scriptChatMessage("Т/С выданы всем игрокам!")
     end)
 end
 
@@ -239,7 +239,7 @@ function setFuelAllInRadius(targetRadius, fuelAmount)
     end
 
     if #vehicleIds == 0 then
-        sampAddChatMessage("Машины в радиусе не найдены!", -1)
+        scriptChatMessage("Машины в радиусе не найдены!")
         return
     end
 
@@ -248,7 +248,7 @@ function setFuelAllInRadius(targetRadius, fuelAmount)
             sampSendChat("/setfuel "..carId.." "..fuelAmount)
             wait(1500)
         end
-        sampAddChatMessage("Топливо успешно выдано всем машинам в радиусе!", -1)
+        scriptChatMessage("Топливо успешно выдано всем машинам в радиусе!")
     end)
 end
 
@@ -444,7 +444,7 @@ local function startEventAutomation(mode)
         eventAutomation.active = false
         eventSpawnStatusText = u8("Позиция: Укажите слот 0-29")
         eventSpawnStatusColor = imgui.ImVec4(0.90, 0.35, 0.35, 1.0)
-        sampAddChatMessage("[ Event Helper ] Укажите номер слота МП (0-29), затем повторите действие.", -1)
+        scriptChatMessage("Укажите номер слота МП (0-29), затем повторите действие.")
         return
     end
     eventAutomation.active = true
@@ -682,6 +682,14 @@ local textcolor = "{FFFFFF}"
 local warncolor = "{FFFFFF}"
 local WinState = imgui.new.bool()
 
+scriptChatMessage = function(message)
+    local msg = tostring(message or "")
+    if msg:sub(1, #tag) ~= tag then
+        msg = tag .. textcolor .. msg
+    end
+    sampAddChatMessage(msg, tagcolor)
+end
+
 local function formatPrize(prizeText)
     local digits = tostring(prizeText or ""):gsub("%D", "")
 
@@ -804,12 +812,12 @@ local function sendMpResultToServer()
     isMpSendInProgress = false
 
     if sentOk then
-        sampAddChatMessage(tag .. textcolor .. ":true: Данные успешно переданы в таблицу.", tagcolor)
+        scriptChatMessage(":true: Данные успешно переданы в таблицу.")
     else
         if ok and resultOrError then
-            sampAddChatMessage(tag .. textcolor .. ":warning: Ошибка отправки: " .. tostring(resultOrError), tagcolor)
+            scriptChatMessage(":warning: Ошибка отправки: " .. tostring(resultOrError))
         end
-        sampAddChatMessage(tag .. textcolor .. ":x: Не удалось передать данные в таблицу.", tagcolor)
+        scriptChatMessage(":x: Не удалось передать данные в таблицу.")
     end
 end
 
@@ -869,7 +877,7 @@ local function startAutoTsRadiusThread()
             local vehicleId = u8:decode(str(IDT)):match("%d+")
 
             if not vehicleId or vehicleId == "" then
-                sampAddChatMessage(tag .. textcolor .. "Укажите ID Т/С в поле \"ID Т/С для выдачи\".", tagcolor)
+                scriptChatMessage("Укажите ID Т/С в поле \"ID Т/С для выдачи\".")
                 autotsradius[0] = false
                 mainIni.settings.autotsradius = false
                 save_ini()
@@ -957,9 +965,9 @@ function main ()
     mainIni.settings.autotsradius = false
     mainIni.settings.autospawnradius = false
     save_ini()
-    sampAddChatMessage(tag .. textcolor .. "Подготовка к работе, пожалуйста, подождите..", tagcolor)
-    sampAddChatMessage(tag .. textcolor .. "Открыть главное меню: " .. warncolor .. "/mph", tagcolor)
-    sampAddChatMessage(tag .. textcolor .. "Разработчик скрипта: V.Harrison", tagcolor)
+    scriptChatMessage("Подготовка к работе, пожалуйста, подождите..")
+    scriptChatMessage("Открыть главное меню: " .. warncolor .. "/mph")
+    scriptChatMessage("Разработчик скрипта: V.Harrison")
     while true do
         wait(0)
         imgui.Procces = true
@@ -1066,17 +1074,17 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
                 autotsradius[0] = false
                 mainIni.settings.autotsradius = false
                 save_ini()
-                sampAddChatMessage(tag .. textcolor .. "Укажите ID Т/С в поле \"ID Т/С для выдачи\".", tagcolor)
+                scriptChatMessage("Укажите ID Т/С в поле \"ID Т/С для выдачи\".")
             else
                 mainIni.settings.autotsradius = true
                 save_ini()
                 startAutoTsRadiusThread()
-                sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе включена.", tagcolor)
+                scriptChatMessage("Автовыдача Т/С в радиусе включена.")
             end
         else
             mainIni.settings.autotsradius = false
             save_ini()
-            sampAddChatMessage(tag .. textcolor .. "Автовыдача Т/С в радиусе выключена.", tagcolor)
+            scriptChatMessage("Автовыдача Т/С в радиусе выключена.")
         end
     end
     if addons.ToggleButton(u8'Авто Spawn',autospawnradius) then
@@ -1084,9 +1092,9 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         save_ini()
         if autospawnradius[0] then
             startAutoSpawnRadiusThread()
-            sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе включен.", tagcolor)
+            scriptChatMessage("Авто Spawn игроков без Т/С в радиусе включен.")
         else
-            sampAddChatMessage(tag .. textcolor .. "Авто Spawn игроков без Т/С в радиусе выключен.", tagcolor)
+            scriptChatMessage("Авто Spawn игроков без Т/С в радиусе выключен.")
         end
     end
     local bottomTitleTop = u8("Event Helper")
@@ -1181,7 +1189,7 @@ imgui.OnFrame(function() return WinState[0] end, function(player)
         if ids ~= "" then
             plvehall(ids)
         else
-            sampAddChatMessage("Введите ID транспорта!", -1)
+            scriptChatMessage("Введите ID транспорта!")
         end
     end
     imgui.SetCursorPosX(rightColumnStartX + math.max((rightColumnWidth - giveRowWidth) / 2, 0))
@@ -1319,7 +1327,7 @@ if addons.AnimButton(u8'Отправить итог /ao') then
             disableMainProtectionToggles()
         end)
     else
-        sampAddChatMessage("Игрок не найден!", -1)
+        scriptChatMessage("Игрок не найден!")
     end
 end
 end
@@ -1455,7 +1463,7 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
             hideSpawnDialogsUntil = os.clock() + 5
             if not eventSpawnMessageSent then
                 eventSpawnMessageSent = true
-                sampAddChatMessage(tag .. textcolor .. "Позиция спавна успешно установлена.", tagcolor)
+                scriptChatMessage("Позиция спавна успешно установлена.")
             end
             return false
         end
@@ -1610,7 +1618,7 @@ function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
             if needStartEvent then
                 sampSendDialogResponse(dialogId, 1, RULES_MENU_INDEX.START_EVENT, "")
             end
-            sampAddChatMessage(tag .. textcolor .. "Настройки успешно применены.", tagcolor)
+            scriptChatMessage("Настройки успешно применены.")
         end)
         return false
     end
@@ -1638,10 +1646,10 @@ function sampev.onBulletSync(playerId, data)
                 if not tkInfo[playerId] then tkInfo[playerId] = 1; else tkInfo[playerId] = tkInfo[playerId] + 1; end;
 
                 if (tkInfo[playerId] >= 3) then
-                    sampAddChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] был замечен в {FF0000}TeamKill {FFFFFF}уже {FF0000}'..tkInfo[playerId]..' раз!!', 0xFF0000)
+                    scriptChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] был замечен в {FF0000}TeamKill {FFFFFF}уже {FF0000}'..tkInfo[playerId]..' раз!!')
                     if (tkInfo[playerId] == 5) then
                         lua_thread.create(function()
-                            sampAddChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] совершил {FF0000}TeamKill 5 раз{FFFFFF} и был наказан!!', 0xFF0000)
+                            scriptChatMessage('WARNING >> {FFFFFF}Игрок '..sampGetPlayerNickname(playerId)..'['..playerId..'] совершил {FF0000}TeamKill 5 раз{FFFFFF} и был наказан!!')
                             wait(0)
                             sampSendChat('/spplayer '..playerId)
                             wait(0)
